@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMenu,
+    QScrollArea,
     QSizePolicy,
     QTextEdit,
     QVBoxLayout,
@@ -41,6 +42,20 @@ from client.profile import ProfileViewModel
 
 if TYPE_CHECKING:
     from client.service import ChatService
+
+
+def configure_surface(widget: QWidget, role: str) -> None:
+    """Make a widget paint an explicit semantic surface instead of its system palette."""
+    if role not in {"surface", "canvas"}:
+        raise ValueError(f"unsupported surface role: {role}")
+    widget.setProperty("surfaceRole", role)
+    widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
+
+def configure_scroll_surface(scroll: QScrollArea, content: QWidget, role: str = "surface") -> None:
+    """Give a scroll area, its viewport, and its content one explicit surface."""
+    for widget in (scroll, scroll.viewport(), content):
+        configure_surface(widget, role)
 
 
 def initials(name: str) -> str:

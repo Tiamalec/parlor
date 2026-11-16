@@ -6,8 +6,9 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 try:
-    from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QColor, QImage, QPalette
+    from PySide6.QtWidgets import QApplication, QScrollArea, QWidget
 except ImportError:  # pragma: no cover - optional until V2 dependencies are installed
     QApplication = None  # type: ignore[assignment]
 
@@ -19,6 +20,14 @@ class V2UiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.app = QApplication.instance() or QApplication([])
+
+    def tearDown(self) -> None:
+        self.app.processEvents()
+        for widget in self.app.topLevelWidgets():
+            widget.close()
+            widget.deleteLater()
+        self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.app.processEvents()
 
     def test_auth_page_and_conversation_card_layout(self) -> None:
         from client.v2.application import AuthPage
@@ -47,6 +56,59 @@ class V2UiTests(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(workspace.conversations.isVisible())
         workspace.close()
+
+    def test_scroll_surfaces_override_dark_system_palette(self) -> None:
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import AICenterPage, ChatPane, ConversationPane
+        from client.v2.theme import COLORS, stylesheet
+        from client.v2.widgets import configure_scroll_surface
+
+        original_palette = QPalette(self.app.palette())
+        original_stylesheet = self.app.styleSheet()
+        dark_palette = QPalette(original_palette)
+        dark_palette.setColor(QPalette.ColorRole.Window, QColor("#333333"))
+        dark_palette.setColor(QPalette.ColorRole.Base, QColor("#333333"))
+        self.app.setPalette(dark_palette)
+        self.app.setStyleSheet(stylesheet())
+        try:
+            for role, expected in (("surface", COLORS["surface"]), ("canvas", COLORS["canvas"])):
+                area = QScrollArea()
+                content = QWidget()
+                content.resize(100, 60)
+                configure_scroll_surface(area, content, role)
+                area.setWidget(content)
+                area.resize(120, 80)
+                area.show()
+                self.app.processEvents()
+                image = QImage(content.size(), QImage.Format.Format_ARGB32)
+                image.fill(Qt.GlobalColor.transparent)
+                content.render(image)
+                self.assertEqual(image.pixelColor(image.width() // 2, image.height() // 2).name().upper(), expected)
+                area.close()
+                area.deleteLater()
+
+            store = AppStore()
+            service = ChatService(NetworkClient("127.0.0.1", 9), store)
+            conversations = ConversationPane()
+            chat = ChatPane(service, store)
+            tasks = AICenterPage(service, store)
+            self.assertEqual(conversations.content.property("surfaceRole"), "surface")
+            self.assertEqual(conversations.scroll.viewport().property("surfaceRole"), "surface")
+            self.assertEqual(chat.property("surfaceRole"), "canvas")
+            self.assertEqual(chat.message_content.property("surfaceRole"), "surface")
+            self.assertEqual(chat.details.scroll_content.property("surfaceRole"), "surface")
+            self.assertEqual(tasks.property("surfaceRole"), "canvas")
+            self.assertEqual(tasks.task_content.property("surfaceRole"), "canvas")
+            for widget in (conversations, chat, tasks):
+                widget.close()
+                widget.deleteLater()
+            self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            self.app.processEvents()
+        finally:
+            self.app.setPalette(original_palette)
+            self.app.setStyleSheet(original_stylesheet)
 
     def test_message_bubble_uses_explicit_content_format(self) -> None:
         from client.v2.widgets import MessageBubble, markdown_to_safe_html

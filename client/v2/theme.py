@@ -96,7 +96,9 @@ def stylesheet() -> str:
     QListWidget#DirectoryList::item:disabled {{ min-height: 22px; color: {c['text_muted']}; font-size: 12px; font-weight: 650; }}
     QListWidget::item:selected, QTreeWidget::item:selected {{ background: {c['primary_soft']}; color: {c['text']}; }}
     QHeaderView::section {{ background: {c['surface_soft']}; border: none; border-bottom: 1px solid {c['border']}; padding: 8px; font-weight: 650; }}
-    QScrollArea {{ border: none; background: transparent; }}
+    QScrollArea {{ border: none; }}
+    QWidget[surfaceRole="surface"] {{ background: {c['surface']}; }}
+    QWidget[surfaceRole="canvas"] {{ background: {c['canvas']}; }}
     QScrollBar:vertical {{ background: transparent; width: 10px; margin: 3px; }}
     QScrollBar::handle:vertical {{ background: #C9D1DE; border-radius: 4px; min-height: 28px; }}
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}

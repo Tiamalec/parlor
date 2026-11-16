@@ -47,7 +47,16 @@ from client.store import AppStore
 from .theme import COLORS, stylesheet
 from .details import ConversationDetailsPanel
 from .profile_widgets import ProfilePopover, UserProfileCard
-from .widgets import Avatar, ConversationCard, EmptyState, MentionTextEdit, MessageBubble, UserAvatar
+from .widgets import (
+    Avatar,
+    ConversationCard,
+    EmptyState,
+    MentionTextEdit,
+    MessageBubble,
+    UserAvatar,
+    configure_scroll_surface,
+    configure_surface,
+)
 
 
 MAX_IMAGE_SIZE = 2 * 1024 * 1024
@@ -177,6 +186,7 @@ class ConversationPane(QFrame):
         self.cards.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.cards.setContentsMargins(0, 0, 0, 0)
         self.cards.setSpacing(2)
+        configure_scroll_surface(self.scroll, self.content)
         self.scroll.setWidget(self.content)
         layout.addWidget(title)
         layout.addWidget(self.search)
@@ -216,6 +226,7 @@ class DetailsScrim(QFrame):
 class ChatPane(QWidget):
     def __init__(self, service: ChatService, store: AppStore) -> None:
         super().__init__()
+        configure_surface(self, "canvas")
         self.service = service
         self.store = store
         self.key: ConversationKey | None = None
@@ -269,6 +280,7 @@ class ChatPane(QWidget):
         self.messages.setAlignment(Qt.AlignmentFlag.AlignBottom)
         self.messages.setContentsMargins(18, 16, 18, 16)
         self.messages.setSpacing(8)
+        configure_scroll_surface(self.scroll, self.message_content)
         self.scroll.setWidget(self.message_content)
         composer = QWidget()
         composer.setStyleSheet("border-top:1px solid #E4E8F0;")
@@ -575,6 +587,7 @@ class ContactsPage(QWidget):
 
     def __init__(self, service: ChatService) -> None:
         super().__init__()
+        configure_surface(self, "canvas")
         self.service = service
         self.current_user_id = 0
         self._selected_user: dict[str, Any] | None = None
@@ -906,6 +919,7 @@ class AICenterPage(QWidget):
 
     def __init__(self, service: ChatService, store: AppStore) -> None:
         super().__init__()
+        configure_surface(self, "canvas")
         self.service = service
         self.store = store
         root = QVBoxLayout(self)
@@ -929,11 +943,12 @@ class AICenterPage(QWidget):
         filters.addWidget(self.scope_filter, 1)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
-        content = QWidget()
-        self.task_rows = QVBoxLayout(content)
+        self.task_content = QWidget()
+        self.task_rows = QVBoxLayout(self.task_content)
         self.task_rows.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.task_rows.setSpacing(8)
-        self.scroll.setWidget(content)
+        configure_scroll_surface(self.scroll, self.task_content, "canvas")
+        self.scroll.setWidget(self.task_content)
         root.addLayout(title_row)
         root.addWidget(self.status)
         root.addLayout(filters)
@@ -997,6 +1012,7 @@ class AICenterPage(QWidget):
 class AdminPage(QWidget):
     def __init__(self) -> None:
         super().__init__()
+        configure_surface(self, "canvas")
         root = QVBoxLayout(self)
         title = QLabel("管理员控制台")
         title.setObjectName("PageTitle")
@@ -1076,6 +1092,7 @@ class SettingsPage(QWidget):
 
     def __init__(self, service: ChatService, store: AppStore, host: str, port: int) -> None:
         super().__init__()
+        configure_surface(self, "canvas")
         self.service = service
         self.store = store
         root = QVBoxLayout(self)
@@ -1146,6 +1163,7 @@ class Workspace(QWidget):
 
     def __init__(self, service: ChatService, store: AppStore, host: str, port: int) -> None:
         super().__init__()
+        configure_surface(self, "canvas")
         self.service = service
         self.store = store
         root = QHBoxLayout(self)
@@ -1176,6 +1194,7 @@ class Workspace(QWidget):
         self.nav_buttons[0].setChecked(True)
         self.pages = QStackedWidget()
         chat_root = QWidget()
+        configure_surface(chat_root, "canvas")
         chat_layout = QHBoxLayout(chat_root)
         chat_layout.setContentsMargins(0, 0, 0, 0)
         chat_layout.setSpacing(10)

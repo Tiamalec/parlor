@@ -21,7 +21,7 @@ from client.models import AppState, ConversationKey
 from client.service import ChatService
 
 from .profile_widgets import ProfilePopover
-from .widgets import Avatar, ToggleSwitch, UserAvatar
+from .widgets import Avatar, ToggleSwitch, UserAvatar, configure_scroll_surface
 
 
 def role_label(member: dict[str, Any]) -> str:
@@ -291,8 +291,8 @@ class ConversationDetailsPanel(QFrame):
         root.addWidget(header)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        content = QWidget()
-        self.content_layout = QVBoxLayout(content)
+        self.scroll_content = QWidget()
+        self.content_layout = QVBoxLayout(self.scroll_content)
         self.content_layout.setContentsMargins(16, 8, 16, 18)
         self.content_layout.setSpacing(20)
         self.overview = QFrame()
@@ -315,7 +315,8 @@ class ConversationDetailsPanel(QFrame):
         self.content_layout.addWidget(self.members)
         self.content_layout.addWidget(self.schedule)
         self.content_layout.addStretch()
-        scroll.setWidget(content)
+        configure_scroll_surface(scroll, self.scroll_content)
+        scroll.setWidget(self.scroll_content)
         root.addWidget(scroll, 1)
         self.close_button.clicked.connect(self.close_requested)
         self.members.moderation_requested.connect(self._moderate)
