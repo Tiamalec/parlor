@@ -1,0 +1,260 @@
+from __future__ import annotations
+
+import asyncio
+import base64
+import tempfile
+import unittest
+from dataclasses import replace
+from pathlib import Path
+from typing import Any
+
+from server.app import ChatServer
+from server.config import Config
+from shared.protocol import encode_frame, envelope, read_frame
+
+
+class WireClient:
+    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        self.reader = reader
+        self.writer = writer
+        self.backlog: list[dict[str, Any]] = []
+
+    @classmethod
+    async def connect(cls, port: int) -> "WireClient":
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        return cls(reader, writer)
+
+    async def send(self, message_type: str, payload: dict[str, Any] | None = None, request_id: str | None = None) -> str:
+        message = envelope(message_type, payload or {}, request_id=request_id)
+        self.writer.write(encode_frame(message))
+        await self.writer.drain()
+        return message["request_id"]
+
+    async def until(self, message_type: str, *, request_id: str | None = None, timeout: float = 3.0) -> dict[str, Any]:
+        for index, message in enumerate(self.backlog):
+            if message["type"] == message_type and (request_id is None or message["request_id"] == request_id):
+                return self.backlog.pop(index)
+
+        async def receive() -> dict[str, Any]:
+            while True:
+                message = await read_frame(self.reader)
+                if message["type"] == message_type and (request_id is None or message["request_id"] == request_id):
+                    return message
+                self.backlog.append(message)
+
+        return await asyncio.wait_for(receive(), timeout)
+
+    async def close(self) -> None:
+        self.writer.close()
+        await self.writer.wait_closed()
+
+
+class ServerIntegrationTests(unittest.TestCase):
+    def test_three_clients_chat_disconnect_and_agent_failure_isolation(self) -> None:
+        asyncio.run(self._scenario())
+
+    async def _scenario(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base = Config.from_env()
+            config = replace(
+                base,
+                host="127.0.0.1",
+                port=0,
+                data_dir=root,
+                database_path=root / "chat.sqlite3",
+                uploads_dir=root / "uploads",
+                admin_username=None,
+                admin_password=None,
+                agent_base_url="http://127.0.0.1:9/v1",
+                agent_timeout_seconds=1,
+            )
+            server = ChatServer(config)
+            await server.start()
+            assert server._server and server._server.sockets
+            port = int(server._server.sockets[0].getsockname()[1])
+            alice, bob, carol = await asyncio.gather(*(WireClient.connect(port) for _ in range(3)))
+            try:
+                users: dict[str, dict[str, Any]] = {}
+                for client, username in ((alice, "alice"), (bob, "bob01"), (carol, "carol")):
+                    request_id = await client.send("auth.register", {"username": username, "password": "password-123"})
+                    result = await client.until("auth.result", request_id=request_id)
+                    self.assertTrue(result["payload"]["ok"])
+                    self.assertTrue(result["payload"]["capabilities"]["conversation_list"])
+                    users[username] = result["payload"]["user"]
+
+                png = base64.b64decode(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                )
+                avatar_id = await alice.send(
+                    "profile.avatar.set",
+                    {"image_mime": "image/png", "image_data": base64.b64encode(png).decode("ascii")},
+                )
+                await alice.until("ack", request_id=avatar_id)
+                profile = await bob.until("profile.updated")
+                self.assertEqual(profile["payload"]["user"]["avatar_version"], 1)
+                get_avatar_id = await bob.send("profile.avatar.get", {"user_id": users["alice"]["id"]})
+                avatar = await bob.until("profile.avatar.result", request_id=get_avatar_id)
+                self.assertEqual(base64.b64decode(avatar["payload"]["image_data"]), png)
+                oversized = b"\x89PNG\r\n\x1a\n" + b"\x00" * 8 + (5000).to_bytes(4, "big") + (5000).to_bytes(4, "big")
+                oversized_id = await alice.send(
+                    "profile.avatar.set",
+                    {"image_mime": "image/png", "image_data": base64.b64encode(oversized).decode("ascii")},
+                )
+                oversized_error = await alice.until("error", request_id=oversized_id)
+                self.assertIn("格式不匹配", oversized_error["payload"]["message"])
+
+                create_id = await alice.send("group.create", {"name": "网络实验组"})
+                created = await alice.until("group.created", request_id=create_id)
+                group_id = created["payload"]["group"]["id"]
+                for client in (bob, carol):
+                    join_id = await client.send("group.join", {"group_id": group_id})
+                    await client.until("ack", request_id=join_id)
+
+                members_id = await alice.send("group.members", {"group_id": group_id})
+                members = await alice.until("group.members", request_id=members_id)
+                self.assertEqual(next(item for item in members["payload"]["members"] if item["kind"] == "agent")["member_id"], "agent")
+                self.assertTrue(members["payload"]["permissions"]["can_manage_members"])
+                self.assertFalse(members["payload"]["schedule"]["enabled"])
+                bob_member = next(
+                    item for item in members["payload"]["members"] if item.get("id") == users["bob01"]["id"]
+                )
+                self.assertEqual(bob_member["available_actions"], ["mute"])
+
+                mention_text = "@bob01 请确认"
+                mention_id = await alice.send(
+                    "message.send",
+                    {
+                        "conversation_type": "group",
+                        "conversation_id": group_id,
+                        "message_type": "text",
+                        "content": mention_text,
+                        "mentions": [
+                            {"member_id": f"user:{users['bob01']['id']}", "start": 0, "length": 6}
+                        ],
+                    },
+                )
+                mentioned_events = await asyncio.gather(
+                    alice.until("message.event"), bob.until("message.event"), carol.until("message.event")
+                )
+                self.assertEqual(mentioned_events[1]["payload"]["message"]["mentions"][0]["member_id"], f"user:{users['bob01']['id']}")
+                await alice.until("ack", request_id=mention_id)
+                self.assertEqual(server.database.list_agent_activity(users["alice"]["id"]), [])
+
+                utf16_text = "  😀 @bob01 请确认"
+                utf16_id = await alice.send(
+                    "message.send",
+                    {
+                        "conversation_type": "group",
+                        "conversation_id": group_id,
+                        "message_type": "text",
+                        "content": utf16_text,
+                        "mention_index_unit": "utf16",
+                        "mentions": [
+                            {"member_id": f"user:{users['bob01']['id']}", "start": 5, "length": 6}
+                        ],
+                    },
+                )
+                utf16_events = await asyncio.gather(
+                    alice.until("message.event"), bob.until("message.event"), carol.until("message.event")
+                )
+                self.assertEqual(utf16_events[0]["payload"]["message"]["content"], "😀 @bob01 请确认")
+                self.assertEqual(utf16_events[0]["payload"]["message"]["mentions"][0]["start"], 2)
+                await alice.until("ack", request_id=utf16_id)
+
+                invalid_id = await alice.send(
+                    "message.send",
+                    {
+                        "conversation_type": "group",
+                        "conversation_id": group_id,
+                        "message_type": "text",
+                        "content": "@ghost hi",
+                        "mentions": [{"member_id": "user:99999", "start": 0, "length": 6}],
+                    },
+                )
+                invalid = await alice.until("error", request_id=invalid_id)
+                self.assertIn("不属于", invalid["payload"]["message"])
+
+                send_id = await bob.send(
+                    "message.send",
+                    {"conversation_type": "group", "conversation_id": group_id, "message_type": "text", "content": "三客户端群聊测试"},
+                )
+                event_a, event_c = await asyncio.gather(alice.until("message.event"), carol.until("message.event"))
+                self.assertEqual(event_a["payload"]["message"]["content"], "三客户端群聊测试")
+                self.assertEqual(event_c["payload"]["message"]["content"], "三客户端群聊测试")
+                await bob.until("ack", request_id=send_id)
+                own_group_event = await bob.until("message.event")
+                self.assertEqual(own_group_event["payload"]["message"]["conversation_type"], "group")
+
+                conversations_id = await alice.send("conversation.list")
+                conversations = await alice.until("conversation.list", request_id=conversations_id)
+                projected = next(
+                    item
+                    for item in conversations["payload"]["conversations"]
+                    if item["conversation_type"] == "group" and str(item["conversation_id"]) == str(group_id)
+                )
+                self.assertEqual(projected["last_message_preview"], "三客户端群聊测试")
+
+                status_id = await alice.send("system.status")
+                denied = await alice.until("error", request_id=status_id)
+                self.assertIn("管理员", denied["payload"]["message"])
+
+                private_id = await alice.send(
+                    "message.send",
+                    {"conversation_type": "private", "conversation_id": users["bob01"]["id"], "message_type": "text", "content": "私聊测试"},
+                )
+                private_event = await bob.until("message.event")
+                self.assertEqual(private_event["payload"]["message"]["conversation_type"], "private")
+                await alice.until("ack", request_id=private_id)
+                own_private_event = await alice.until("message.event")
+                self.assertEqual(own_private_event["payload"]["message"]["content"], "私聊测试")
+
+                await carol.close()
+                offline = await alice.until("presence.changed")
+                while offline["payload"].get("user", {}).get("id") != users["carol"]["id"] or offline["payload"].get("online"):
+                    offline = await alice.until("presence.changed")
+                self.assertFalse(offline["payload"]["online"])
+
+                agent_id = await alice.send(
+                    "message.send",
+                    {
+                        "conversation_type": "group",
+                        "conversation_id": group_id,
+                        "message_type": "text",
+                        "content": "@AI Agent 总结最近20条消息",
+                        "mentions": [{"member_id": "agent", "start": 0, "length": 9}],
+                    },
+                )
+                await alice.until("ack", request_id=agent_id)
+                await asyncio.gather(alice.until("message.event"), bob.until("message.event"))
+
+                normal_id = await bob.send(
+                    "message.send",
+                    {"conversation_type": "group", "conversation_id": group_id, "message_type": "text", "content": "模型离线时聊天仍可用"},
+                )
+                normal_event = await alice.until("message.event")
+                self.assertEqual(normal_event["payload"]["message"]["content"], "模型离线时聊天仍可用")
+                await bob.until("ack", request_id=normal_id)
+                failed = await alice.until("agent.result", timeout=4.0)
+                while failed["payload"].get("status") != "failed":
+                    failed = await alice.until("agent.result", timeout=4.0)
+                self.assertFalse(failed["payload"]["success"])
+                activity_id = await alice.send("agent.activity.list")
+                activity = await alice.until("agent.activity.list", request_id=activity_id)
+                self.assertEqual(activity["payload"]["activities"][0]["status"], "failed")
+
+                logout_id = await bob.send("auth.logout")
+                await bob.until("ack", request_id=logout_id)
+                bob_offline = await alice.until("presence.changed")
+                while bob_offline["payload"].get("user", {}).get("id") != users["bob01"]["id"]:
+                    bob_offline = await alice.until("presence.changed")
+                self.assertFalse(bob_offline["payload"]["online"])
+            finally:
+                await alice.close()
+                await bob.close()
+                await server.close()
+
+
+if __name__ == "__main__":
+    unittest.main()
+

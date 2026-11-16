@@ -1,0 +1,7 @@
+FROM qwen3.5:4b
+
+# Reserve enough context for the application input budget and final answer
+# while remaining practical on the target 16 GB Apple Silicon machine.
+PARAMETER num_ctx 8192
+PARAMETER temperature 0.2
+

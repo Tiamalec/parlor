@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Server Admin Console</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main id="login" class="login-shell">
+    <form id="login-form" class="card login-card">
+      <div class="brand">SC</div>
+      <h1>Server Admin Console</h1>
+      <p class="muted">仅授权管理员可访问</p>
+      <label>用户名<input name="username" autocomplete="username" required></label>
+      <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
+      <button type="submit">登录</button>
+      <p id="login-error" class="error"></p>
+    </form>
+  </main>
+
+  <main id="console" class="app hidden">
+    <aside>
+      <div class="logo">SC</div>
+      <nav>
+        <button data-page="dashboard" class="active">概览</button>
+        <button data-page="models">模型配置</button>
+        <button data-page="agents">Agent 管理</button>
+        <button data-page="logs">运行日志</button>
+        <button data-page="directory">基础管理</button>
+        <button data-page="audit">管理审计</button>
+      </nav>
+      <div class="aside-bottom"><span id="admin-name"></span><button id="logout" class="secondary">退出</button></div>
+    </aside>
+    <section class="content">
+      <header><div><h1 id="page-title">服务器概览</h1><p id="page-subtitle" class="muted">实时掌握聊天服务与 Agent 状态</p></div><span id="global-status" class="status">正在连接</span></header>
+      <div id="notice" class="notice hidden"></div>
+
+      <section id="page-dashboard" class="page">
+        <div id="metric-cards" class="metrics"></div>
+        <div class="grid two">
+          <article class="card"><h2>TCP 服务</h2><div id="tcp-detail"></div></article>
+          <article class="card"><h2>Agent 状态</h2><div id="agent-detail"></div></article>
+        </div>
+      </section>
+
+      <section id="page-models" class="page hidden">
+        <div class="model-workspace">
+          <article class="card model-sidebar">
+            <div class="toolbar"><div><h2>模型配置</h2><p class="muted compact">保存多套配置并随时切换</p></div><button id="new-profile" type="button">新增</button></div>
+            <div id="profile-list" class="profile-list"></div>
+          </article>
+          <article class="card model-editor">
+            <div class="toolbar"><div><h2 id="profile-editor-title">新增模型配置</h2><p class="muted compact">密钥不会回显；切换前会先完成连接测试。</p></div><span id="profile-status" class="pill">未测试</span></div>
+            <form id="profile-form" class="form-grid">
+              <input name="id" type="hidden">
+              <label>配置名称<input name="name" maxlength="80" required></label>
+              <label>供应商预设<select name="preset_id" required></select></label>
+              <label>API 协议<select name="protocol"><option value="openai_chat">OpenAI Chat</option><option value="ollama_native">Ollama Native</option><option value="gemini_native">Gemini Native</option></select></label>
+              <label>认证方式<select name="auth_type"><option value="none">无需认证</option><option value="bearer">Bearer Token</option><option value="x-api-key">X-API-Key</option><option value="x-goog-api-key">Google API Key</option></select></label>
+              <label class="wide">API 地址<input name="base_url" type="url" required></label>
+              <label class="wide">模型 ID<div class="inline-field"><input name="model" list="model-options" autocomplete="off" required><button id="discover-models" class="secondary" type="button">刷新模型</button></div><datalist id="model-options"></datalist><small>可从服务获取，也可以直接填写模型 ID。</small></label>
+              <label class="wide">API Key<input name="api_key" type="password" placeholder="留空表示保持现有密钥" autocomplete="new-password"><small id="key-status">当前未配置密钥</small></label>
+              <label class="check-row wide"><input name="clear_api_key" type="checkbox">清除已保存的 API Key</label>
+              <label>Temperature<input name="temperature" type="number" min="0" max="2" step="0.1"></label>
+              <label>最大输出 Token<input name="max_output_tokens" type="number" min="1" max="32768"></label>
+              <label>超时（秒）<input name="timeout_seconds" type="number" min="1" max="300"></label>
+              <label>最大并发<input name="max_concurrency" type="number" min="1" max="16"></label>
+              <details class="wide advanced"><summary>高级设置</summary><div class="form-grid"><label>Reasoning Effort<input name="reasoning_effort" placeholder="none / low / medium / high"></label><label class="wide">附加请求参数（JSON）<textarea name="extra_parameters" rows="5" placeholder="{}"></textarea></label></div></details>
+              <div class="wide model-actions"><button type="submit">保存</button><button id="test-profile" class="secondary" type="button">测试连接</button><button id="activate-profile" type="button">设为默认并切换</button><button id="delete-profile" class="danger" type="button">删除</button></div>
+            </form>
+          </article>
+        </div>
+      </section>
+
+      <section id="page-agents" class="page hidden">
+        <article class="card toolbar"><div><h2>Agent 运行开关</h2><p id="agent-switch-state" class="muted"></p></div><button id="agent-toggle"></button></article>
+        <article class="card"><h2>最近运行</h2><div class="table-wrap"><table><thead><tr><th>ID</th><th>任务</th><th>发起者</th><th>状态</th><th>开始时间</th><th>错误</th></tr></thead><tbody id="runs-body"></tbody></table></div></article>
+        <article class="card"><h2>工具调用</h2><div class="table-wrap"><table><thead><tr><th>工具</th><th>调用者</th><th>会话</th><th>状态</th><th>结果</th></tr></thead><tbody id="tools-body"></tbody></table></div></article>
+      </section>
+
+      <section id="page-logs" class="page hidden"><article class="card"><div class="toolbar"><h2>运行日志</h2><button id="refresh-logs" class="secondary">刷新</button></div><pre id="logs-output"></pre></article></section>
+
+      <section id="page-directory" class="page hidden">
+        <div class="grid two">
+          <article class="card"><h2>用户</h2><div id="users-list" class="list"></div></article>
+          <article class="card"><h2>群组</h2><div id="groups-list" class="list"></div></article>
+        </div>
+        <article class="card"><h2>权限管理</h2><p class="muted">已预留版本化接口。首期保持只读，避免引入破坏性账户操作。</p></article>
+      </section>
+
+      <section id="page-audit" class="page hidden"><article class="card"><h2>管理操作审计</h2><div class="table-wrap"><table><thead><tr><th>时间</th><th>管理员</th><th>动作</th><th>资源</th><th>结果</th></tr></thead><tbody id="audit-body"></tbody></table></div></article></section>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
