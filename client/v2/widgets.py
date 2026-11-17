@@ -40,13 +40,15 @@ from PySide6.QtWidgets import (
 from client.models import ConversationSummary
 from client.profile import ProfileViewModel
 
+from .theme import ThemeSnapshot, active_theme_manager, current_tokens
+
 if TYPE_CHECKING:
     from client.service import ChatService
 
 
 def configure_surface(widget: QWidget, role: str) -> None:
     """Make a widget paint an explicit semantic surface instead of its system palette."""
-    if role not in {"surface", "canvas"}:
+    if role not in {"surface", "canvas", "subtle", "elevated"}:
         raise ValueError(f"unsupported surface role: {role}")
     widget.setProperty("surfaceRole", role)
     widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -74,13 +76,14 @@ def avatar_image(image_data: str | None) -> QImage:
 
 
 def avatar_pixmap(name: str, size: int, image_data: str | None = None, *, agent: bool = False) -> QPixmap:
+    tokens = current_tokens()
     canvas = QPixmap(size, size)
     canvas.fill(Qt.GlobalColor.transparent)
     image = avatar_image(image_data)
     painter = QPainter(canvas)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor("#7657E8" if agent else "#4F7CFF"))
+    painter.setBrush(QColor(tokens.agent if agent else tokens.avatar_user))
     painter.drawRoundedRect(0, 0, size, size, size / 2, size / 2)
     if not image.isNull():
         scaled = image.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
@@ -89,7 +92,7 @@ def avatar_pixmap(name: str, size: int, image_data: str | None = None, *, agent:
         painter.setClipPath(clip)
         painter.drawImage((size - scaled.width()) // 2, (size - scaled.height()) // 2, scaled)
     else:
-        painter.setPen(Qt.GlobalColor.white)
+        painter.setPen(QColor(tokens.avatar_text))
         font = QFont()
         font.setBold(True)
         font.setPixelSize(max(11, size // 3))
@@ -101,7 +104,8 @@ def avatar_pixmap(name: str, size: int, image_data: str | None = None, *, agent:
 
 def mentions_to_safe_html(source: str, mentions: list[dict[str, Any]]) -> str:
     """Escape plain text and highlight validated mention ranges without parsing Markdown."""
-    parts: list[str] = []
+    tokens = current_tokens()
+    parts: list[str] = [f'<span style="color:{tokens.text_primary};">']
     cursor = 0
     for mention in sorted(mentions, key=lambda item: int(item.get("start", -1))):
         start = int(mention.get("start", -1))
@@ -110,52 +114,62 @@ def mentions_to_safe_html(source: str, mentions: list[dict[str, Any]]) -> str:
             continue
         parts.append(html.escape(source[cursor:start]).replace("\n", "<br>"))
         token = html.escape(source[start:start + length])
-        color = "#6556B3" if mention.get("kind") == "agent" else "#2F62D5"
-        parts.append(f'<span style="color:{color};font-weight:600;">{token}</span>')
+        is_agent = mention.get("kind") == "agent"
+        foreground = tokens.mention_agent_fg if is_agent else tokens.mention_user_fg
+        background = tokens.mention_agent_bg if is_agent else tokens.mention_user_bg
+        parts.append(
+            f'<span style="color:{foreground};background-color:{background};font-weight:600;">{token}</span>'
+        )
         cursor = start + length
     parts.append(html.escape(source[cursor:]).replace("\n", "<br>"))
+    parts.append("</span>")
     return "".join(parts)
 
 
 def markdown_to_safe_html(source: str) -> str:
     """Render compact chat Markdown without embedded HTML or remote images."""
+    tokens = current_tokens()
     document = QTextDocument()
     features = (
         QTextDocument.MarkdownFeature.MarkdownDialectGitHub
         | QTextDocument.MarkdownFeature.MarkdownNoHTML
     )
     document.setMarkdown(source, features)
-    html = re.sub(r"<img\b[^>]*>", "", document.toHtml(), flags=re.IGNORECASE)
-    html = html.replace("font-family:;", "font-family:'Segoe UI','Microsoft YaHei UI',sans-serif;")
-    html = html.replace("font-weight:400;", "font-size:14px; font-weight:400;", 1)
-    html = html.replace("font-size:xx-large", "font-size:16px")
-    html = html.replace("font-size:x-large", "font-size:15px")
-    html = html.replace("font-size:large", "font-size:14px")
-    html = re.sub(
+    rendered = re.sub(r"<img\b[^>]*>", "", document.toHtml(), flags=re.IGNORECASE)
+    rendered = rendered.replace("font-family:;", "font-family:'Segoe UI','Microsoft YaHei UI',sans-serif;")
+    rendered = rendered.replace("font-weight:400;", f"color:{tokens.text_primary}; font-size:14px; font-weight:400;", 1)
+    rendered = rendered.replace("font-size:xx-large", "font-size:16px")
+    rendered = rendered.replace("font-size:x-large", "font-size:15px")
+    rendered = rendered.replace("font-size:large", "font-size:14px")
+    rendered = re.sub(
         r'<h([1-6]) style=" ([^"]*)margin-bottom:0px;([^"]*)">',
         lambda match: (
             f'<h{match.group(1)} style=" {match.group(2)}'
             f"margin-bottom:5px;{match.group(3)}\">"
         ),
-        html,
+        rendered,
     )
-    html = re.sub(
+    rendered = re.sub(
         r'<p style=" ([^"]*)margin-bottom:0px;([^"]*)">',
         r'<p style=" \1margin-bottom:6px;\2">',
-        html,
+        rendered,
     )
-    html = re.sub(
+    rendered = re.sub(
         r'<li style=" ([^"]*)margin-bottom:0px;([^"]*)">',
         r'<li style=" \1margin-bottom:2px;\2">',
-        html,
+        rendered,
     )
-    html = re.sub(
+    rendered = re.sub(
         r'<pre style=" ([^"]*)">',
-        r'<table width="100%" cellspacing="0" cellpadding="6" bgcolor="#F1F3F6"><tr><td><pre style=" margin-top:0px; margin-bottom:0px; \1">',
-        html,
+        f'<table width="100%" cellspacing="0" cellpadding="6" bgcolor="{tokens.code_bg}"><tr><td><pre style=" color:{tokens.code_fg}; margin-top:0px; margin-bottom:0px; \\1">',
+        rendered,
     )
-    html = html.replace("</pre>", "</pre></td></tr></table>")
-    return html
+    rendered = rendered.replace("</pre>", "</pre></td></tr></table>")
+    rendered = rendered.replace(
+        "</head>",
+        f"<style>a {{ color: {tokens.primary}; }} code {{ color: {tokens.code_fg}; }}</style></head>",
+    )
+    return rendered
 
 
 def agent_message_role(source: str) -> str:
@@ -173,15 +187,25 @@ class Avatar(QLabel):
         super().__init__()
         self._size = size
         self._agent = agent
+        self._name = name
+        self._image_data = image_data
         self.setFixedSize(size, size)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.set_avatar(name, image_data, agent=agent)
+        manager = active_theme_manager()
+        if manager:
+            manager.themeChanged.connect(self._theme_changed)
 
     def set_avatar(self, name: str, image_data: str | None = None, *, agent: bool | None = None) -> None:
         if agent is not None:
             self._agent = agent
+        self._name = name
+        self._image_data = image_data
         self.setPixmap(avatar_pixmap(name, self._size, image_data, agent=self._agent))
         self.setToolTip(name)
+
+    def _theme_changed(self, _snapshot: ThemeSnapshot) -> None:
+        self.setPixmap(avatar_pixmap(self._name, self._size, self._image_data, agent=self._agent))
 
 
 class UserAvatar(Avatar):
@@ -224,19 +248,26 @@ class ToggleSwitch(QAbstractButton):
         self.setCheckable(True)
         self.setFixedSize(42, 24)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        manager = active_theme_manager()
+        if manager:
+            manager.themeChanged.connect(self._theme_changed)
+
+    def _theme_changed(self, _snapshot: ThemeSnapshot) -> None:
+        self.update()
 
     def paintEvent(self, event: Any) -> None:
         del event
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
+        tokens = current_tokens()
         if not self.isEnabled():
-            track = QColor("#D0D5DD")
+            track = QColor(tokens.switch_disabled)
         else:
-            track = QColor("#4F7CFF" if self.isChecked() else "#C7CEDA")
+            track = QColor(tokens.primary if self.isChecked() else tokens.switch_off)
         painter.setBrush(track)
         painter.drawRoundedRect(QRectF(0, 2, 42, 20), 10, 10)
-        painter.setBrush(QColor("#FFFFFF"))
+        painter.setBrush(QColor(tokens.switch_knob))
         knob_x = 21 if self.isChecked() else 3
         painter.drawEllipse(QRectF(knob_x, 4, 16, 16))
         painter.end()
@@ -258,6 +289,9 @@ class MentionTextEdit(QTextEdit):
         self.mention_popup_active = False
         self.textChanged.connect(lambda: QTimer.singleShot(0, self._update_mention_query))
         self.cursorPositionChanged.connect(self._update_mention_query)
+        manager = active_theme_manager()
+        if manager:
+            manager.themeChanged.connect(self._theme_changed)
 
     def inputMethodEvent(self, event: Any) -> None:
         self._composing = bool(event.preeditString())
@@ -423,11 +457,46 @@ class MentionTextEdit(QTextEdit):
         return results
 
     def _mention_format(self, metadata: str, kind: str) -> QTextCharFormat:
+        tokens = current_tokens()
         mention_format = QTextCharFormat()
-        mention_format.setForeground(QColor("#6556B3" if kind == "agent" else "#2F62D5"))
+        mention_format.setForeground(QColor(tokens.mention_agent_fg if kind == "agent" else tokens.mention_user_fg))
+        mention_format.setBackground(QColor(tokens.mention_agent_bg if kind == "agent" else tokens.mention_user_bg))
         mention_format.setFontWeight(QFont.Weight.DemiBold)
         mention_format.setProperty(self.MENTION_PROPERTY, metadata)
         return mention_format
+
+    def _theme_changed(self, _snapshot: ThemeSnapshot) -> None:
+        active = self.textCursor()
+        position, anchor = active.position(), active.anchor()
+        fragments: list[tuple[int, int, str, str]] = []
+        block = self.document().begin()
+        while block.isValid():
+            iterator = block.begin()
+            while not iterator.atEnd():
+                fragment = iterator.fragment()
+                raw = fragment.charFormat().property(self.MENTION_PROPERTY) if fragment.isValid() else None
+                if raw:
+                    try:
+                        metadata = json.loads(str(raw))
+                    except (TypeError, json.JSONDecodeError):
+                        metadata = None
+                    if isinstance(metadata, dict):
+                        fragments.append(
+                            (fragment.position(), fragment.position() + fragment.length(), str(raw), str(metadata.get("kind", "user")))
+                        )
+                iterator += 1
+            block = block.next()
+        edit = QTextCursor(self.document())
+        edit.beginEditBlock()
+        for start, end, metadata, kind in fragments:
+            edit.setPosition(start)
+            edit.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+            edit.mergeCharFormat(self._mention_format(metadata, kind))
+        edit.endEditBlock()
+        restored = self.textCursor()
+        restored.setPosition(anchor)
+        restored.setPosition(position, QTextCursor.MoveMode.KeepAnchor)
+        self.setTextCursor(restored)
 
     def _mention_fragments(self) -> list[tuple[int, int]]:
         ranges: list[tuple[int, int]] = []
@@ -479,10 +548,6 @@ class ConversationCard(QFrame):
         self.setObjectName("ConversationCard")
         self.setFixedHeight(72)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setStyleSheet(
-            "QFrame#ConversationCard{background:transparent;border-radius:11px;}"
-            "QFrame#ConversationCard:hover{background:#F3F6FC;}"
-        )
         row = QHBoxLayout(self)
         row.setContentsMargins(10, 9, 10, 9)
         row.setSpacing(10)
@@ -490,12 +555,11 @@ class ConversationCard(QFrame):
         text = QVBoxLayout()
         top = QHBoxLayout()
         title = QLabel(summary.title)
-        title.setStyleSheet("font-weight:650;")
+        title.setObjectName("ConversationTitle")
         top.addWidget(title)
         top.addStretch()
         clock = QLabel(time.strftime("%H:%M", time.localtime(summary.timestamp)) if summary.timestamp else "")
-        clock.setObjectName("Muted")
-        clock.setStyleSheet("font-size:12px;color:#98A2B3;")
+        clock.setObjectName("ConversationTime")
         top.addWidget(clock)
         text.addLayout(top)
         bottom = QHBoxLayout()
@@ -507,7 +571,7 @@ class ConversationCard(QFrame):
             badge = QLabel(str(min(summary.unread_count, 99)))
             badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             badge.setFixedSize(22, 22)
-            badge.setStyleSheet("background:#F04438;color:white;border-radius:11px;font-size:11px;font-weight:700;")
+            badge.setObjectName("UnreadBadge")
             bottom.addWidget(badge)
         text.addLayout(bottom)
         row.addLayout(text, 1)
@@ -527,31 +591,26 @@ class MessageBubble(QFrame):
         self.mine = mine
         self.setObjectName("MessageBubble")
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
-        agent = message.get("message_type") == "agent" or str(message.get("sender_name", "")).lower() == "agent"
-        self.setMaximumWidth(620 if agent else 540)
-        raw_content = str(message.get("content", message.get("text", "")))
-        role = agent_message_role(raw_content) if agent else ""
-        if agent and (role in {"summary", "todo"} or "```" in raw_content):
+        self.agent = message.get("message_type") == "agent" or str(message.get("sender_name", "")).lower() == "agent"
+        self._raw_content = str(message.get("content", message.get("text", "")))
+        self._content_format = str(message.get("content_format", "plain"))
+        self.setProperty("messageRole", "agent" if self.agent else "outgoing" if mine else "incoming")
+        self.setMaximumWidth(620 if self.agent else 540)
+        role = agent_message_role(self._raw_content) if self.agent else ""
+        if self.agent and (role in {"summary", "todo"} or "```" in self._raw_content):
             self.setMinimumWidth(440)
-        color = "#FBFAFF" if agent else ("#DDE8FF" if mine else "#FFFFFF")
-        border = "#DED9EF" if agent else "#E4E8F0"
-        self.setStyleSheet(
-            f"QFrame#MessageBubble{{background:{color};border:1px solid {border};border-radius:12px;}}"
-            "QFrame#MessageBubble QLabel#AgentMarkdownContent{font-size:14px;font-weight:400;color:#252B37;}"
-            "QFrame#MessageBubble QLabel#PlainMessageContent{font-size:14px;font-weight:400;}"
-        )
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(11 if agent else 12, 8 if agent else 9, 11 if agent else 12, 7 if agent else 9)
+        layout.setContentsMargins(11 if self.agent else 12, 8 if self.agent else 9, 11 if self.agent else 12, 7 if self.agent else 9)
         layout.setSpacing(4)
         sender = str(message.get("sender_name", message.get("sender", "未知用户")))
-        if not mine or agent:
+        if not mine or self.agent:
             role_label = {"summary": " · 总结", "todo": " · 待办", "answer": ""}.get(role, "")
-            name = QLabel(f"AI Agent{role_label}" if agent else sender)
-            name.setStyleSheet(f"font-size:12px;font-weight:600;color:{'#6556B3' if agent else '#667085'};")
+            name = QLabel(f"AI Agent{role_label}" if self.agent else sender)
+            name.setObjectName("AgentMessageSender" if self.agent else "MessageSender")
             layout.addWidget(name)
         if message.get("recalled"):
             content = QLabel("消息已撤回")
-            content.setStyleSheet("color:#98A2B3;font-style:italic;")
+            content.setObjectName("RecalledMessage")
             layout.addWidget(content)
         elif message.get("message_type") == "image":
             image = QLabel()
@@ -571,31 +630,10 @@ class MessageBubble(QFrame):
         else:
             content = QLabel()
             self.content_label = content
-            if message.get("content_format") == "markdown":
-                content.setObjectName("AgentMarkdownContent" if agent else "MarkdownMessageContent")
-                content.setTextFormat(Qt.TextFormat.RichText)
-                content.setOpenExternalLinks(False)
-                rendered = markdown_to_safe_html(raw_content)
-                content.setText(rendered)
-                if self.minimumWidth() > 0:
-                    measure = QTextDocument()
-                    measure.setDocumentMargin(0)
-                    measure.setHtml(rendered)
-                    measure.setTextWidth(self.minimumWidth() - layout.contentsMargins().left() - layout.contentsMargins().right())
-                    content.setMinimumHeight(math.ceil(measure.size().height()) + 18)
-            else:
-                content.setObjectName("PlainMessageContent")
-                mentions = message.get("mentions")
-                if isinstance(mentions, list) and mentions:
-                    content.setTextFormat(Qt.TextFormat.RichText)
-                    content.setOpenExternalLinks(False)
-                    content.setText(mentions_to_safe_html(raw_content, mentions))
-                else:
-                    content.setTextFormat(Qt.TextFormat.PlainText)
-                    content.setText(raw_content)
+            self._render_text_content()
             content.setWordWrap(True)
             content.setSizePolicy(
-                QSizePolicy.Policy.Expanding if agent and message.get("content_format") == "markdown" else QSizePolicy.Policy.Preferred,
+                QSizePolicy.Policy.Expanding if self.agent and self._content_format == "markdown" else QSizePolicy.Policy.Preferred,
                 QSizePolicy.Policy.Preferred,
             )
             content.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.LinksAccessibleByMouse)
@@ -605,10 +643,45 @@ class MessageBubble(QFrame):
             stamp /= 1000
         footer = QLabel(time.strftime("%H:%M", time.localtime(stamp)) if stamp else "")
         footer.setAlignment(Qt.AlignmentFlag.AlignRight)
-        footer.setStyleSheet("font-size:11px;color:#98A2B3;")
+        footer.setObjectName("MessageTime")
         layout.addWidget(footer)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._menu)
+        manager = active_theme_manager()
+        if manager:
+            manager.themeChanged.connect(self._theme_changed)
+
+    def _render_text_content(self) -> None:
+        content = getattr(self, "content_label", None)
+        if content is None:
+            return
+        if self._content_format == "markdown":
+            content.setObjectName("AgentMarkdownContent" if self.agent else "MarkdownMessageContent")
+            content.setTextFormat(Qt.TextFormat.RichText)
+            content.setOpenExternalLinks(False)
+            rendered = markdown_to_safe_html(self._raw_content)
+            content.setText(rendered)
+            if self.minimumWidth() > 0:
+                measure = QTextDocument()
+                measure.setDocumentMargin(0)
+                measure.setHtml(rendered)
+                margins = self.layout().contentsMargins()
+                measure.setTextWidth(self.minimumWidth() - margins.left() - margins.right())
+                content.setMinimumHeight(math.ceil(measure.size().height()) + 18)
+            return
+        content.setObjectName("PlainMessageContent")
+        mentions = self.message.get("mentions")
+        if isinstance(mentions, list) and mentions:
+            content.setTextFormat(Qt.TextFormat.RichText)
+            content.setOpenExternalLinks(False)
+            content.setText(mentions_to_safe_html(self._raw_content, mentions))
+        else:
+            content.setTextFormat(Qt.TextFormat.PlainText)
+            content.setText(self._raw_content)
+
+    def _theme_changed(self, _snapshot: ThemeSnapshot) -> None:
+        self._render_text_content()
+        self.update()
 
     def _request_media(self) -> None:
         message_id = self.message.get("id", self.message.get("message_id"))
@@ -631,10 +704,10 @@ class EmptyState(QWidget):
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon = QLabel("💬")
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon.setStyleSheet("font-size:42px;")
+        icon.setObjectName("EmptyStateIcon")
         heading = QLabel(title)
         heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        heading.setStyleSheet("font-size:18px;font-weight:700;")
+        heading.setObjectName("EmptyStateTitle")
         body = QLabel(description)
         body.setObjectName("Muted")
         body.setAlignment(Qt.AlignmentFlag.AlignCenter)

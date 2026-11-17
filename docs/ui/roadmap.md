@@ -14,7 +14,7 @@
 | 0. UI 架构审计 | 完成 | 技术栈、主题根因、组件与依赖评估 |
 | 1. 设计与主题架构冻结 | 完成 | 本目录四份设计规范 |
 | 2. 工程基线与背景泄漏修复 | 完成 | Git 基线、文档、语义表面修复、主题边界测试 |
-| 3. 主题基础设施 | 未开始 | Light/Dark/System、ThemeManager、QPalette、QSS builder |
+| 3. 主题基础设施 | 完成 | Light/Dark/System、ThemeManager、QPalette、QSS builder、富文本与自绘刷新 |
 | 4. 公共视觉组件 | 未开始 | Lucide、PageHeader、StatusBadge、导航等 |
 | 5. 页面迁移 | 未开始 | 聊天、AI、通讯录、设置、管理页 |
 | 6. 清理与拆分 | 未开始 | application.py 渐进拆分、残余硬编码清理 |
@@ -57,6 +57,19 @@
 
 ## 阶段 3：主题基础设施
 
+### 完成记录（2026-11-17）
+
+- 实现不可变 `ThemeTokens`、完整 Light/Dark 语义色板、`ThemeSnapshot` 与主题 revision。
+- 实现 `ThemeManager`，支持 Light、Dark、System，使用 `QSettings` 持久化，并监听 Qt `colorSchemeChanged`。
+- 启动时在创建主窗口前同步应用 QPalette 与 QSS，运行时切换不重建窗口、不触发 Store topic 或网络请求。
+- 统一 canvas/surface/elevated、滚动区、输入框、列表、菜单、弹窗和消息气泡的主题规则；移除 V2 中本阶段涉及的局部颜色 QSS。
+- MessageBubble、Markdown、代码块、Mention、fallback Avatar 与 ToggleSwitch 可随主题原位刷新；保持消息对象、编辑内容、Mention ID、滚动位置和业务引用。
+- 设置页增加“跟随系统 / 浅色 / 深色”选择，不改变页面整体布局。
+- 新增 6 项主题测试；当前全量 62 项测试通过 61 项，实时 Ollama 测试按配置跳过。
+- Qt offscreen 完成 Light/Dark/System 多页面视觉矩阵，System 与对应显式主题截图一致；macOS Qt cocoa 完成应用内容浅/深色渲染检查。
+- 未验证 Windows、Linux、macOS 原生标题栏与原生文件对话框的强制主题一致性。
+- 860px 宽度下聊天区仍存在既有横向滚动与头像边缘受压；该问题属于页面响应式布局，不在主题基础设施阶段调整，页面迁移时需单独验收。
+
 ### 修改范围
 
 - `ThemeTokens`、`ThemeManager`、QSS builder、QSettings、最小 QPalette fallback。
@@ -72,6 +85,11 @@
 
 - 系统 Light/Dark × 应用三模式，无启动闪烁和混合底板。
 - 原生标题栏/文件对话框若跟随系统而非强制模式，按已知平台限制记录，不宣称完全一致。
+
+### 回滚
+
+- 阶段 3 为独立 Git 提交，可回滚到阶段 2 提交 `66b8949`。
+- 主题偏好仅存储于 `QSettings`；旧版本忽略该键，无数据迁移依赖。
 
 ## 阶段 4：公共视觉组件
 

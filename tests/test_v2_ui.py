@@ -62,7 +62,7 @@ class V2UiTests(unittest.TestCase):
         from client.service import ChatService
         from client.store import AppStore
         from client.v2.application import AICenterPage, ChatPane, ConversationPane
-        from client.v2.theme import COLORS, stylesheet
+        from client.v2.theme import LIGHT_TOKENS, stylesheet
         from client.v2.widgets import configure_scroll_surface
 
         original_palette = QPalette(self.app.palette())
@@ -73,7 +73,7 @@ class V2UiTests(unittest.TestCase):
         self.app.setPalette(dark_palette)
         self.app.setStyleSheet(stylesheet())
         try:
-            for role, expected in (("surface", COLORS["surface"]), ("canvas", COLORS["canvas"])):
+            for role, expected in (("surface", LIGHT_TOKENS.surface), ("canvas", LIGHT_TOKENS.canvas)):
                 area = QScrollArea()
                 content = QWidget()
                 content.resize(100, 60)
@@ -111,6 +111,7 @@ class V2UiTests(unittest.TestCase):
             self.app.setStyleSheet(original_stylesheet)
 
     def test_message_bubble_uses_explicit_content_format(self) -> None:
+        from client.v2.theme import current_tokens
         from client.v2.widgets import MessageBubble, markdown_to_safe_html
 
         symbols = "*不是斜体* #不是标题 _保持下划线_ <b>不是 HTML</b>"
@@ -135,7 +136,7 @@ class V2UiTests(unittest.TestCase):
         self.assertIn("font-weight:700", rendered)
         self.assertNotIn("font-size:xx-large", rendered)
         self.assertIn("font-size:16px", rendered)
-        self.assertIn('bgcolor="#f1f3f6"', rendered.lower())
+        self.assertIn(f'bgcolor="{current_tokens().code_bg.lower()}"', rendered.lower())
         self.assertEqual(markdown.content_label.objectName(), "AgentMarkdownContent")
         self.assertEqual(markdown.maximumWidth(), 620)
         self.assertEqual(markdown.minimumWidth(), 440)

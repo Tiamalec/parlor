@@ -44,7 +44,7 @@ from client.network import NetworkClient
 from client.service import ChatService
 from client.store import AppStore
 
-from .theme import COLORS, stylesheet
+from .theme import ThemeMode, ThemeSnapshot, active_theme_manager, install_theme_manager
 from .details import ConversationDetailsPanel
 from .profile_widgets import ProfilePopover, UserProfileCard
 from .widgets import (
@@ -90,7 +90,7 @@ class AuthPage(QWidget):
         layout.setSpacing(14)
         mark = QLabel("✦")
         mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        mark.setStyleSheet(f"font-size:34px;color:{COLORS['primary']};font-weight:800;")
+        mark.setObjectName("AuthBrandMark")
         title = QLabel("AI Agent 智能聊天室")
         title.setObjectName("PageTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -216,7 +216,7 @@ class DetailsScrim(QFrame):
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
-        self.setStyleSheet("background:rgba(29,36,51,0.16);border:none;")
+        self.setObjectName("DetailsScrim")
 
     def mousePressEvent(self, event: Any) -> None:
         super().mousePressEvent(event)
@@ -283,7 +283,7 @@ class ChatPane(QWidget):
         configure_scroll_surface(self.scroll, self.message_content)
         self.scroll.setWidget(self.message_content)
         composer = QWidget()
-        composer.setStyleSheet("border-top:1px solid #E4E8F0;")
+        composer.setObjectName("Composer")
         composer_layout = QVBoxLayout(composer)
         composer_layout.setContentsMargins(14, 10, 14, 12)
         toolbar = QHBoxLayout()
@@ -1025,7 +1025,7 @@ class AdminPage(QWidget):
             frame.setObjectName("Surface")
             box = QVBoxLayout(frame)
             value = QLabel("—")
-            value.setStyleSheet("font-size:26px;font-weight:750;")
+            value.setObjectName("MetricValue")
             caption = QLabel(label)
             caption.setObjectName("Muted")
             box.addWidget(value)
@@ -1116,6 +1116,23 @@ class SettingsPage(QWidget):
         profile_row.addWidget(self.avatar)
         profile_row.addLayout(profile_actions)
         profile_row.addStretch()
+        appearance_row = QHBoxLayout()
+        appearance_label = QLabel("外观主题")
+        self.theme_mode = QComboBox()
+        self.theme_mode.addItem("跟随系统", ThemeMode.SYSTEM.value)
+        self.theme_mode.addItem("浅色", ThemeMode.LIGHT.value)
+        self.theme_mode.addItem("深色", ThemeMode.DARK.value)
+        appearance_row.addWidget(appearance_label)
+        appearance_row.addStretch()
+        appearance_row.addWidget(self.theme_mode)
+        manager = active_theme_manager()
+        if manager:
+            index = self.theme_mode.findData(manager.mode.value)
+            self.theme_mode.setCurrentIndex(max(0, index))
+            manager.themeChanged.connect(self._theme_snapshot_changed)
+        else:
+            self.theme_mode.setEnabled(False)
+        self.theme_mode.currentIndexChanged.connect(self._change_theme)
         self.connection = QLabel(f"服务器 {host}:{port}")
         self.connection.setObjectName("Muted")
         shortcuts = QLabel("发送快捷键：Ctrl+Enter（macOS 同时支持 Cmd+Enter）")
@@ -1126,6 +1143,7 @@ class SettingsPage(QWidget):
         logout.setObjectName("DangerButton")
         content.addWidget(self.user)
         content.addLayout(profile_row)
+        content.addLayout(appearance_row)
         content.addWidget(self.connection)
         content.addWidget(shortcuts)
         content.addWidget(privacy)
@@ -1136,6 +1154,22 @@ class SettingsPage(QWidget):
         logout.clicked.connect(self.logout_requested)
         self.change_avatar.clicked.connect(self._change_avatar)
         self.reset_avatar.clicked.connect(lambda: self.service.set_avatar())
+
+    def _change_theme(self, _index: int) -> None:
+        manager = active_theme_manager()
+        value = self.theme_mode.currentData()
+        if manager and value:
+            manager.set_mode(str(value))
+
+    def _sync_theme_mode(self, mode: ThemeMode) -> None:
+        index = self.theme_mode.findData(mode.value)
+        if index >= 0 and index != self.theme_mode.currentIndex():
+            self.theme_mode.blockSignals(True)
+            self.theme_mode.setCurrentIndex(index)
+            self.theme_mode.blockSignals(False)
+
+    def _theme_snapshot_changed(self, snapshot: ThemeSnapshot) -> None:
+        self._sync_theme_mode(snapshot.mode)
 
     def update_state(self, topic: str, state: AppState) -> None:
         if topic in {"auth", "connection", "session", "profile", "avatar"}:
@@ -1176,7 +1210,7 @@ class Workspace(QWidget):
         rail_layout.setContentsMargins(8, 12, 8, 12)
         logo = QLabel("✦")
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo.setStyleSheet(f"font-size:25px;color:{COLORS['primary']};font-weight:800;")
+        logo.setObjectName("BrandMark")
         rail_layout.addWidget(logo)
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
@@ -1340,8 +1374,9 @@ class MainWindow(QMainWindow):
 
 def run(host: str, port: int) -> None:
     app = QApplication.instance() or QApplication(sys.argv)
+    app.setOrganizationName("Chatroom")
     app.setApplicationName("AI Agent 智能聊天室")
-    app.setStyleSheet(stylesheet())
+    install_theme_manager(app)
     window = MainWindow(host, port)
     window.show()
     raise SystemExit(app.exec())
