@@ -198,12 +198,16 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QFrame#ProfileCard {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 12px; }}
     QFrame#ProfilePane {{ background: transparent; border: none; }}
     QFrame#ProfilePopover {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: 12px; }}
-    QFrame#TaskRow {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 10px; }}
+    QFrame#TaskRow {{ background: transparent; border: none; border-bottom: 1px solid {c.border}; border-radius: 0; }}
+    QFrame#TaskRow:hover {{ background: {c.surface_subtle}; }}
+    QFrame#SettingsSection {{ background: transparent; border: none; border-bottom: 1px solid {c.border}; }}
+    QFrame#SettingsRow {{ background: transparent; border: none; }}
     QFrame#Rail {{ background: {c.surface_subtle}; border: none; }}
     QFrame#DetailsScrim {{ background: {c.overlay_scrim}; border: none; }}
     QWidget#ChatHeader {{ background: {c.surface}; border-bottom: 1px solid {c.border}; }}
     QWidget#Composer {{ background: {c.surface}; border-top: 1px solid {c.border}; }}
     QStackedWidget#ContactDetails {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 10px; }}
+    QStackedWidget#SettingsContent {{ background: transparent; border: none; }}
     QLabel#PageTitle {{ font-size: 20px; font-weight: 700; }}
     QLabel#SectionTitle {{ font-size: 16px; font-weight: 600; }}
     QLabel#ProfileName {{ font-size: 20px; font-weight: 700; }}
@@ -212,7 +216,14 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QLabel#EmptyStateTitle {{ font-size: 18px; font-weight: 700; }}
     QLabel#BrandMark {{ font-size: 25px; color: {c.primary}; font-weight: 700; }}
     QLabel#AuthBrandMark {{ font-size: 34px; color: {c.primary}; font-weight: 700; }}
-    QLabel#TaskStatus {{ color: {c.text_secondary}; background: {c.surface_subtle}; border-radius: 8px; padding: 5px 8px; }}
+    QLabel#TaskTitle {{ font-weight: 600; }}
+    QLabel#TaskStatus {{ color: {c.text_secondary}; background: {c.surface_subtle}; border-radius: 6px; padding: 4px 8px; font-size: 12px; }}
+    QLabel#TaskStatus[taskStatus="running"] {{ color: {c.warning}; }}
+    QLabel#TaskStatus[taskStatus="succeeded"] {{ color: {c.success}; }}
+    QLabel#TaskStatus[taskStatus="failed"] {{ color: {c.danger}; }}
+    QLabel#InlineNotice {{ color: {c.text_secondary}; background: {c.surface_subtle}; border-radius: 6px; padding: 7px 9px; }}
+    QLabel#InlineNotice[noticeKind="success"] {{ color: {c.success}; }}
+    QLabel#InlineNotice[noticeKind="error"] {{ color: {c.danger}; }}
     QLabel#Muted, QLabel#MessageTime {{ color: {c.text_tertiary}; }}
     QLabel#MessageTime {{ font-size: 11px; }}
     QLabel#DirectoryStatus {{ color: {c.text_secondary}; background: {c.surface_subtle}; border-radius: 6px; padding: 6px 8px; }}
@@ -224,6 +235,8 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QLabel#UnreadBadge {{ background: {c.danger}; color: {c.surface}; border-radius: 11px; font-size: 11px; font-weight: 700; }}
     QLabel#RoleBadge {{ color: {c.text_secondary}; background: {c.surface_subtle}; border-radius: 8px; padding: 3px 7px; font-size: 12px; }}
     QLabel#AgentBadge {{ color: {c.agent}; background: {c.agent_subtle}; border-radius: 8px; padding: 3px 7px; font-size: 12px; font-weight: 600; }}
+    QLabel#AgentBadge[online="false"] {{ color: {c.text_secondary}; background: {c.surface_subtle}; }}
+    QLabel#PlannedBadge {{ color: {c.warning}; background: {c.surface_subtle}; border-radius: 8px; padding: 3px 7px; font-size: 12px; font-weight: 600; }}
     QLabel#MessageSender {{ color: {c.text_secondary}; font-size: 12px; font-weight: 600; }}
     QLabel#AgentMessageSender {{ color: {c.agent}; font-size: 12px; font-weight: 600; }}
     QFrame#MessageBubble {{ border: 1px solid {c.border}; border-radius: 10px; }}
@@ -260,6 +273,7 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QListWidget#MentionCandidates, QListWidget#SearchResults {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: 8px; }}
     QListWidget::item, QTreeWidget::item {{ padding: 8px; border-radius: 8px; }}
     QListWidget#DirectoryList::item {{ min-height: 40px; padding: 6px 8px; }}
+    QListWidget#SettingsNav::item {{ min-height: 32px; padding: 6px 10px; }}
     QListWidget#DirectoryList::item:disabled {{ min-height: 22px; color: {c.text_disabled}; font-size: 12px; font-weight: 600; }}
     QListWidget::item:hover, QTreeWidget::item:hover {{ background: {c.surface_subtle}; }}
     QListWidget::item:selected, QTreeWidget::item:selected {{ background: {c.primary_subtle}; color: {c.text_primary}; }}

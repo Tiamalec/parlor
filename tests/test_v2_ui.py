@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 try:
     from PySide6.QtCore import QEvent, Qt
     from PySide6.QtGui import QColor, QImage, QPalette
-    from PySide6.QtWidgets import QApplication, QPushButton, QScrollArea, QWidget
+    from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QScrollArea, QWidget
 except ImportError:  # pragma: no cover - optional until V2 dependencies are installed
     QApplication = None  # type: ignore[assignment]
 
@@ -107,7 +107,7 @@ class V2UiTests(unittest.TestCase):
             self.assertEqual(chat.message_content.property("surfaceRole"), "surface")
             self.assertEqual(chat.details.scroll_content.property("surfaceRole"), "surface")
             self.assertEqual(tasks.property("surfaceRole"), "canvas")
-            self.assertEqual(tasks.task_content.property("surfaceRole"), "canvas")
+            self.assertEqual(tasks.task_content.property("surfaceRole"), "surface")
             for widget in (conversations, chat, tasks):
                 widget.close()
                 widget.deleteLater()
@@ -426,7 +426,18 @@ class V2UiTests(unittest.TestCase):
                 "status": "succeeded",
                 "started_at": 1,
                 "result_message_id": 42,
-            }
+            },
+            {
+                "id": 100,
+                "task_type": "todo",
+                "conversation_type": "group",
+                "conversation_id": "7",
+                "requested_by_name": "alice",
+                "status": "failed",
+                "started_at": 2,
+                "finished_at": 3,
+                "error": "模型暂时不可用",
+            },
         ]
         page = AICenterPage(ChatService(NetworkClient("127.0.0.1", 9), store), store)
         page.update_state("conversations", store.state)
@@ -435,6 +446,48 @@ class V2UiTests(unittest.TestCase):
         labels = [label.text() for label in card.findChildren(type(page.status))]
         self.assertIn("总结会话", labels)
         self.assertTrue(any("项目组" in text for text in labels))
+        self.assertEqual(page.filter_summary.text(), "2 个任务")
+        self.assertEqual(card.findChild(QLabel, "TaskStatus").property("taskStatus"), "succeeded")
+
+        page.type_filter.setCurrentIndex(page.type_filter.findData("todo"))
+        self.assertEqual(page.filter_summary.text(), "1 个任务")
+        failed_card = page.task_rows.itemAt(0).widget()
+        self.assertIsInstance(failed_card, AgentTaskCard)
+        self.assertTrue(any("模型暂时不可用" in label.text() for label in failed_card.findChildren(QLabel)))
+
+        store.state.pending["request"] = "agent.activity.list"
+        page.update_state("pending", store.state)
+        self.assertFalse(page.notice.isHidden())
+        self.assertIn("正在更新", page.notice.text())
+
+    def test_settings_groups_real_controls_and_marks_unsupported_preferences(self) -> None:
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import SettingsPage
+
+        store = AppStore()
+        store.state.current_user = {"id": 1, "username": "alice", "role": "user"}
+        store.state.connection_text = "已连接"
+        store.state.agent_online = True
+        store.state.agent_model = "qwen-test"
+        page = SettingsPage(ChatService(NetworkClient("127.0.0.1", 9), store), store, "127.0.0.1", 8765)
+        page.resize(680, 520)
+        page.show()
+        page.update_state("auth", store.state)
+        self.app.processEvents()
+
+        self.assertEqual(page.settings_nav.count(), 6)
+        self.assertTrue(page.compact_nav.isVisible())
+        self.assertFalse(page.settings_sidebar.isVisible())
+        page._select_section(4)
+        self.assertEqual(page.settings_stack.currentIndex(), 4)
+        self.assertEqual(page.agent_setting_status.text(), "Agent 在线")
+        self.assertIn("qwen-test", page.agent_setting_model.text())
+        planned = [label for label in page.findChildren(QLabel) if label.objectName() == "PlannedBadge"]
+        self.assertGreaterEqual(len(planned), 5)
+        self.assertTrue(all(label.text() == "待实现" for label in planned))
+        self.assertEqual(page.theme_mode.count(), 3)
 
     def test_mention_editor_waits_for_chinese_input_method_commit(self) -> None:
         from PySide6.QtGui import QInputMethodEvent
