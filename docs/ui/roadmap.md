@@ -95,10 +95,10 @@
 
 ### Navigation Rail 完成记录（2026-11-19）
 
-- V2 左侧导航收敛为 76px 桌面 Navigation Rail，导航项固定 56px 高，图标为 20px、标签为 11px；移除无功能意义的顶部星形装饰。
+- V2 左侧导航收敛为 80px 桌面 Navigation Rail，导航项统一为 64×60px，图标为 21px、标签为 12px；移除无功能意义的顶部星形装饰。
 - 消息、通讯、AI 与管理员入口位于上部，设置入口通过布局伸缩固定底部；管理员入口继续沿用现有角色可见性逻辑。
 - 使用 Qt Resource 内置消息、通讯、AI、管理和设置五个精选 Lucide SVG，并按 ThemeTokens 动态生成 1x/2x DPR 的普通、悬停、选中和禁用图标。
-- 导航项提供 hover、pressed、checked、focus、disabled 状态、tooltip、accessibleName 和方向键切换；消息入口增加聚合未读数标记。
+- 导航项提供 hover、pressed、checked、focus、disabled 状态、tooltip、accessibleName 和方向键切换；选中态不改变字重或几何尺寸，键盘焦点使用独立底边指示；消息入口增加聚合未读数标记。
 - 页面索引、路由 Signal 与页面业务对象保持不变；运行时切换主题会刷新图标，但不会重建导航或丢失当前选中页面。
 - Qt offscreen 与真实 macOS cocoa 环境完成 Light/Dark、1180×760 和 720×520 截图验收；短窗口设置入口保持底部且无截断、溢出。
 - 22 项 V2 UI/主题测试通过；全量 65 项测试通过 64 项，1 项显式启用的本地 Ollama 实时测试跳过；`compileall` 与 Qt Resource 再生成一致性检查通过。

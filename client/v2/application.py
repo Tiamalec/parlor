@@ -1796,8 +1796,8 @@ class NavigationButton(QToolButton):
         self.setObjectName("NavItem")
         self.setText(label)
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-        self.setIconSize(QSize(20, 20))
-        self.setFixedHeight(56)
+        self.setIconSize(QSize(21, 21))
+        self.setFixedSize(64, 60)
         self.setCheckable(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setToolTip(label)
@@ -1810,7 +1810,7 @@ class NavigationButton(QToolButton):
         self.refresh_icon()
 
     def refresh_icon(self) -> None:
-        self.setIcon(lucide_icon(self.icon_name, 20))
+        self.setIcon(lucide_icon(self.icon_name, 21))
 
     def set_badge(self, count: int) -> None:
         count = max(0, int(count))
@@ -1821,7 +1821,7 @@ class NavigationButton(QToolButton):
         self._position_badge()
 
     def _position_badge(self) -> None:
-        self.badge.move(self.width() - self.badge.width() - 5, 3)
+        self.badge.move(self.width() - self.badge.width() - 4, 3)
 
     def resizeEvent(self, event: Any) -> None:
         super().resizeEvent(event)
@@ -1843,9 +1843,9 @@ class Workspace(QWidget):
         root.setSpacing(8)
         self.rail = QFrame()
         self.rail.setObjectName("Rail")
-        self.rail.setFixedWidth(76)
+        self.rail.setFixedWidth(80)
         rail_layout = QVBoxLayout(self.rail)
-        rail_layout.setContentsMargins(6, 12, 6, 12)
+        rail_layout.setContentsMargins(8, 12, 8, 12)
         rail_layout.setSpacing(4)
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)

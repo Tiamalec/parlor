@@ -261,12 +261,12 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QPushButton#SegmentedTab {{ min-height: 32px; border: none; background: transparent; color: {c.text_secondary}; }}
     QPushButton#SegmentedTab:hover {{ background: {c.surface_subtle}; color: {c.text_primary}; }}
     QPushButton#SegmentedTab:checked {{ background: {c.primary_subtle}; color: {c.primary}; font-weight: 600; }}
-    QToolButton#NavItem {{ color: {c.text_secondary}; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 4px 2px 3px 2px; font-size: 11px; font-weight: 400; }}
+    QToolButton#NavItem {{ color: {c.text_secondary}; background: transparent; border: 1px solid transparent; border-radius: 10px; padding: 4px 2px 3px 2px; font-size: 12px; font-weight: 400; }}
     QToolButton#NavItem:hover {{ color: {c.text_primary}; background: {c.surface_subtle}; }}
     QToolButton#NavItem:pressed {{ color: {c.primary_pressed}; background: {c.primary_subtle}; }}
-    QToolButton#NavItem:checked {{ color: {c.primary}; background: {c.primary_subtle}; font-weight: 600; }}
+    QToolButton#NavItem:checked {{ color: {c.primary}; background: {c.primary_subtle}; }}
     QToolButton#NavItem:checked:hover {{ color: {c.primary_hover}; background: {c.primary_subtle}; }}
-    QToolButton#NavItem:focus {{ border: 2px solid {c.primary}; }}
+    QToolButton#NavItem:focus {{ border: 1px solid transparent; border-bottom: 2px solid {c.primary}; }}
     QToolButton#NavItem:disabled {{ color: {c.text_disabled}; background: transparent; }}
     QPushButton#DangerButton {{ color: {c.danger}; }}
     QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox {{ color: {c.text_primary}; background: {c.surface}; border: 1px solid {c.border}; border-radius: 8px; padding: 8px 10px; selection-background-color: {c.primary}; selection-color: {c.surface}; }}

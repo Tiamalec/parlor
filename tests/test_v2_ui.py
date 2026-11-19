@@ -6,7 +6,7 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 try:
-    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtCore import QEvent, QSize, Qt
     from PySide6.QtGui import QColor, QImage, QPalette
     from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QScrollArea, QToolButton, QWidget
 except ImportError:  # pragma: no cover - optional until V2 dependencies are installed
@@ -84,17 +84,25 @@ class V2UiTests(unittest.TestCase):
         workspace.show()
         self.app.processEvents()
 
-        self.assertEqual(workspace.rail.width(), 76)
+        self.assertEqual(workspace.rail.width(), 80)
         self.assertIsNone(workspace.rail.findChild(QLabel, "BrandMark"))
         self.assertEqual([button.text() for button in workspace.nav_buttons], ["消息", "通讯", "AI", "管理", "设置"])
         self.assertTrue(all(isinstance(button, QToolButton) for button in workspace.nav_buttons))
         for button in workspace.nav_buttons:
-            self.assertEqual(button.height(), 56)
-            self.assertEqual(button.iconSize().width(), 20)
+            self.assertEqual(button.size(), QSize(64, 60))
+            self.assertEqual(button.iconSize(), QSize(21, 21))
             self.assertFalse(button.icon().isNull())
             self.assertEqual(button.accessibleName(), button.text())
             self.assertTrue(button.toolTip())
             self.assertNotEqual(button.focusPolicy(), Qt.FocusPolicy.NoFocus)
+
+        upper_buttons = workspace.nav_buttons[:4]
+        self.assertEqual(len({button.geometry().center().x() for button in workspace.nav_buttons}), 1)
+        self.assertEqual(
+            [upper_buttons[index + 1].y() - upper_buttons[index].y() for index in range(3)],
+            [64, 64, 64],
+        )
+        geometry_before_selection = [button.geometry() for button in workspace.nav_buttons]
 
         workspace.nav_buttons[0].setFocus()
         QTest.keyClick(workspace.nav_buttons[0], Qt.Key.Key_Down)
@@ -105,6 +113,7 @@ class V2UiTests(unittest.TestCase):
             workspace.nav_buttons[index].click()
             self.assertEqual(workspace.pages.currentIndex(), index)
             self.assertTrue(workspace.nav_buttons[index].isChecked())
+            self.assertEqual([button.geometry() for button in workspace.nav_buttons], geometry_before_selection)
 
         user_state = AppState(
             current_user={"id": 1, "role": "user"},
@@ -121,7 +130,7 @@ class V2UiTests(unittest.TestCase):
         admin_state = AppState(current_user={"id": 1, "role": "admin"})
         workspace.update_state("auth", admin_state)
         self.assertTrue(workspace.nav_buttons[3].isVisible())
-        self.assertGreater(workspace.nav_buttons[4].y(), workspace.nav_buttons[3].y() + 56)
+        self.assertGreater(workspace.nav_buttons[4].y(), workspace.nav_buttons[3].y() + 60)
         workspace.close()
 
     def test_scroll_surfaces_override_dark_system_palette(self) -> None:
