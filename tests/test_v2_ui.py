@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 try:
     from PySide6.QtCore import QEvent, Qt
     from PySide6.QtGui import QColor, QImage, QPalette
-    from PySide6.QtWidgets import QApplication, QScrollArea, QWidget
+    from PySide6.QtWidgets import QApplication, QPushButton, QScrollArea, QWidget
 except ImportError:  # pragma: no cover - optional until V2 dependencies are installed
     QApplication = None  # type: ignore[assignment]
 
@@ -40,7 +40,9 @@ class V2UiTests(unittest.TestCase):
         card = ConversationCard(
             ConversationSummary(ConversationKey("group", "1"), "项目组", "最后消息", 1, 3)
         )
-        self.assertEqual(card.height(), 72)
+        self.assertEqual(card.height(), 64)
+        card.set_selected(True)
+        self.assertTrue(card.property("selected"))
 
     def test_workspace_responsive_minimum(self) -> None:
         from client.network import NetworkClient
@@ -55,6 +57,11 @@ class V2UiTests(unittest.TestCase):
         workspace.show()
         self.app.processEvents()
         self.assertFalse(workspace.conversations.isVisible())
+        self.assertTrue(workspace.chat.conversation_list_button.isVisible())
+        workspace.chat.conversation_list_button.click()
+        self.app.processEvents()
+        self.assertTrue(workspace.conversations.isVisible())
+        self.assertFalse(workspace.chat.isVisible())
         workspace.close()
 
     def test_scroll_surfaces_override_dark_system_palette(self) -> None:
@@ -119,6 +126,14 @@ class V2UiTests(unittest.TestCase):
         self.assertEqual(plain.content_label.textFormat(), Qt.TextFormat.PlainText)
         self.assertEqual(plain.content_label.text(), symbols)
         self.assertEqual(plain.content_label.objectName(), "PlainMessageContent")
+
+        agent_plain = MessageBubble(
+            {"sender_kind": "agent", "content_format": "plain", "content": "# 不是标题\n*保持原文*"},
+            mine=False,
+        )
+        self.assertTrue(agent_plain.agent)
+        self.assertEqual(agent_plain.content_label.textFormat(), Qt.TextFormat.PlainText)
+        self.assertEqual(agent_plain.content_label.text(), "# 不是标题\n*保持原文*")
 
         markdown = MessageBubble(
             {
@@ -205,6 +220,17 @@ class V2UiTests(unittest.TestCase):
         store.state.members_by_group["7"] = [
             {"id": 2, "member_id": "user:2", "username": "小明", "kind": "user"},
             {"id": "agent", "member_id": "agent", "username": "AI Agent", "kind": "agent"},
+        ]
+        store.state.messages[ConversationKey("group", "7")] = [
+            {
+                "id": 9,
+                "sender_id": "agent",
+                "sender_kind": "agent",
+                "sender_name": "AI Agent",
+                "message_type": "agent",
+                "content_format": "markdown",
+                "content": "## 结论\n\n可以开始验收。",
+            }
         ]
         pane = ChatPane(ChatService(NetworkClient("127.0.0.1", 9), store), store)
         pane.set_conversation(ConversationKey("group", "7"), "项目组")
@@ -334,10 +360,26 @@ class V2UiTests(unittest.TestCase):
             {"id": 2, "name": "项目组", "joined": 0, "member_role": ""},
         ]
         page = ContactsPage(ChatService(NetworkClient("127.0.0.1", 9), store))
+        page.resize(680, 520)
+        page.show()
+        self.app.processEvents()
         page.update_state("auth", store.state)
+        self.assertTrue(page.directory.isVisible())
+        self.assertFalse(page.details_host.isVisible())
         page._select_user(page.users.item(0))
+        self.app.processEvents()
+        self.assertFalse(page.directory.isVisible())
+        self.assertTrue(page.details_host.isVisible())
         self.assertEqual(page.user_profile.profile.user_id, 2)
         self.assertEqual(page.user_profile.name.text(), "bob01")
+        page._select_user(page.users.item(0))
+        profile_actions = [
+            button for button in page.user_profile.findChildren(QPushButton)
+            if button.text() == "发消息" and button.parent() is page.user_profile
+        ]
+        self.assertEqual(len(profile_actions), 1)
+        page.directory_back.click()
+        self.assertTrue(page.directory.isVisible())
 
         available = next(
             page.groups.item(index)
@@ -348,6 +390,22 @@ class V2UiTests(unittest.TestCase):
         page._select_group(available)
         self.assertEqual(page.group_primary.text(), "加入群聊")
         self.assertFalse(page.group_more.isVisible())
+
+        page.search.setText("bob")
+        self.assertEqual(page.users.count(), 1)
+        self.assertEqual(page.users.item(0).data(Qt.ItemDataRole.UserRole)["id"], 2)
+        page.search.setText("missing")
+        self.assertEqual(page.users.count(), 1)
+        self.assertIsNone(page.users.item(0).data(Qt.ItemDataRole.UserRole))
+
+        page._set_tab(1)
+        page.search.setText("项目")
+        visible_groups = [
+            page.groups.item(index).data(Qt.ItemDataRole.UserRole)
+            for index in range(page.groups.count())
+            if isinstance(page.groups.item(index).data(Qt.ItemDataRole.UserRole), dict)
+        ]
+        self.assertEqual([group["id"] for group in visible_groups], [2])
 
     def test_ai_task_center_uses_readable_records_and_result_signal(self) -> None:
         from client.network import NetworkClient

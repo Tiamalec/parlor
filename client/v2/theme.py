@@ -193,14 +193,17 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QFrame#DetailsOverview {{ background: {c.surface_subtle}; border: none; border-radius: 10px; }}
     QFrame#MemberRow {{ background: transparent; border: none; border-radius: 8px; }}
     QFrame#MemberRow:hover, QFrame#ConversationCard:hover {{ background: {c.surface_subtle}; }}
-    QFrame#ConversationCard {{ background: transparent; border: none; border-radius: 10px; }}
+    QFrame#ConversationCard {{ background: transparent; border: none; border-radius: 8px; }}
+    QFrame#ConversationCard[selected="true"] {{ background: {c.primary_subtle}; }}
     QFrame#ProfileCard {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 12px; }}
     QFrame#ProfilePane {{ background: transparent; border: none; }}
     QFrame#ProfilePopover {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: 12px; }}
     QFrame#TaskRow {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 10px; }}
     QFrame#Rail {{ background: {c.surface_subtle}; border: none; }}
     QFrame#DetailsScrim {{ background: {c.overlay_scrim}; border: none; }}
+    QWidget#ChatHeader {{ background: {c.surface}; border-bottom: 1px solid {c.border}; }}
     QWidget#Composer {{ background: {c.surface}; border-top: 1px solid {c.border}; }}
+    QStackedWidget#ContactDetails {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 10px; }}
     QLabel#PageTitle {{ font-size: 20px; font-weight: 700; }}
     QLabel#SectionTitle {{ font-size: 16px; font-weight: 600; }}
     QLabel#ProfileName {{ font-size: 20px; font-weight: 700; }}
@@ -212,6 +215,7 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QLabel#TaskStatus {{ color: {c.text_secondary}; background: {c.surface_subtle}; border-radius: 8px; padding: 5px 8px; }}
     QLabel#Muted, QLabel#MessageTime {{ color: {c.text_tertiary}; }}
     QLabel#MessageTime {{ font-size: 11px; }}
+    QLabel#DirectoryStatus {{ color: {c.text_secondary}; background: {c.surface_subtle}; border-radius: 6px; padding: 6px 8px; }}
     QLabel#RecalledMessage {{ color: {c.text_tertiary}; font-style: italic; }}
     QLabel#Danger {{ color: {c.danger}; }}
     QLabel#DetailsSectionTitle {{ font-size: 13px; font-weight: 600; color: {c.text_secondary}; }}
@@ -228,6 +232,7 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QFrame#MessageBubble[messageRole="agent"] {{ background: {c.message_agent}; border-color: {c.message_agent_border}; }}
     QFrame#MessageBubble QLabel#AgentMarkdownContent, QFrame#MessageBubble QLabel#MarkdownMessageContent,
     QFrame#MessageBubble QLabel#PlainMessageContent {{ color: {c.text_primary}; font-size: 14px; font-weight: 400; }}
+    QLabel#MessageImage {{ color: {c.text_secondary}; background: {c.surface_subtle}; border-radius: 8px; padding: 8px; }}
     QPushButton {{ min-height: 34px; padding: 0 14px; border: 1px solid {c.border}; border-radius: 8px; background: {c.surface}; color: {c.text_primary}; }}
     QPushButton:hover {{ background: {c.surface_subtle}; border-color: {c.border_strong}; }}
     QPushButton:pressed {{ background: {c.primary_subtle}; }}
@@ -238,16 +243,23 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QPushButton#Primary:pressed {{ background: {c.primary_pressed}; }}
     QPushButton#Ghost {{ border: none; background: transparent; }}
     QPushButton#Ghost:hover {{ background: {c.primary_subtle}; }}
+    QPushButton#ComposerTool {{ min-height: 30px; padding: 0 10px; border: none; background: transparent; color: {c.text_secondary}; }}
+    QPushButton#ComposerTool:hover {{ color: {c.text_primary}; background: {c.surface_subtle}; }}
+    QPushButton#SegmentedTab {{ min-height: 32px; border: none; background: transparent; color: {c.text_secondary}; }}
+    QPushButton#SegmentedTab:hover {{ background: {c.surface_subtle}; color: {c.text_primary}; }}
+    QPushButton#SegmentedTab:checked {{ background: {c.primary_subtle}; color: {c.primary}; font-weight: 600; }}
     QPushButton#Nav {{ border: none; background: transparent; min-height: 52px; border-radius: 10px; padding: 4px; }}
     QPushButton#Nav:checked {{ color: {c.primary}; background: {c.surface}; font-weight: 600; }}
     QPushButton#DangerButton {{ color: {c.danger}; }}
     QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox {{ color: {c.text_primary}; background: {c.surface}; border: 1px solid {c.border}; border-radius: 8px; padding: 8px 10px; selection-background-color: {c.primary}; selection-color: {c.surface}; }}
     QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QComboBox:focus {{ border: 2px solid {c.primary}; }}
     QLineEdit:disabled, QTextEdit:disabled, QComboBox:disabled {{ color: {c.text_disabled}; background: {c.surface_subtle}; }}
+    QTextEdit#ComposerInput {{ background: {c.surface_subtle}; border-color: {c.border}; border-radius: 8px; padding: 10px 12px; }}
+    QTextEdit#ComposerInput:focus {{ background: {c.surface}; border: 2px solid {c.primary}; }}
     QListWidget, QTreeWidget, QTableWidget {{ color: {c.text_primary}; background: transparent; border: none; outline: none; alternate-background-color: {c.surface_subtle}; }}
-    QListWidget#MentionCandidates {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: 8px; }}
+    QListWidget#MentionCandidates, QListWidget#SearchResults {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: 8px; }}
     QListWidget::item, QTreeWidget::item {{ padding: 8px; border-radius: 8px; }}
-    QListWidget#DirectoryList::item {{ min-height: 34px; }}
+    QListWidget#DirectoryList::item {{ min-height: 40px; padding: 6px 8px; }}
     QListWidget#DirectoryList::item:disabled {{ min-height: 22px; color: {c.text_disabled}; font-size: 12px; font-weight: 600; }}
     QListWidget::item:hover, QTreeWidget::item:hover {{ background: {c.surface_subtle}; }}
     QListWidget::item:selected, QTreeWidget::item:selected {{ background: {c.primary_subtle}; color: {c.text_primary}; }}

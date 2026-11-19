@@ -111,6 +111,7 @@ class UserProfileCard(QFrame):
             item = self.actions.takeAt(0)
             widget = item.widget()
             if widget:
+                widget.setParent(None)
                 widget.deleteLater()
 
 

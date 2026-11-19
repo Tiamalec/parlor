@@ -174,9 +174,16 @@ class ConversationPane(QFrame):
         self.setMaximumWidth(340)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 14, 12, 12)
+        heading = QHBoxLayout()
         title = QLabel("消息")
         title.setObjectName("PageTitle")
+        self.count = QLabel("0 个会话")
+        self.count.setObjectName("Muted")
+        heading.addWidget(title)
+        heading.addStretch()
+        heading.addWidget(self.count)
         self.search = QLineEdit()
+        self.search.setObjectName("ConversationSearch")
         self.search.setPlaceholderText("搜索会话")
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -188,26 +195,41 @@ class ConversationPane(QFrame):
         self.cards.setSpacing(2)
         configure_scroll_surface(self.scroll, self.content)
         self.scroll.setWidget(self.content)
-        layout.addWidget(title)
+        layout.addLayout(heading)
         layout.addWidget(self.search)
         layout.addWidget(self.scroll, 1)
         self.search.textChanged.connect(self._filter)
         self._summaries: list[ConversationSummary] = []
+        self._cards: dict[ConversationKey, ConversationCard] = {}
+        self._selected_key: ConversationKey | None = None
 
     def set_conversations(self, summaries: list[ConversationSummary]) -> None:
         self._summaries = summaries
+        self.count.setText(f"{len(summaries)} 个会话")
         self._filter(self.search.text())
+
+    def set_selected(self, key: ConversationKey | None) -> None:
+        self._selected_key = key
+        for card_key, card in self._cards.items():
+            card.set_selected(card_key == key)
+
+    def _activate(self, key: ConversationKey) -> None:
+        self.set_selected(key)
+        self.selected.emit(key)
 
     def _filter(self, keyword: str) -> None:
         clear_layout(self.cards)
+        self._cards.clear()
         clean = keyword.strip().lower()
         visible = [item for item in self._summaries if clean in item.title.lower() or clean in item.preview.lower()]
         if not visible:
-            self.cards.addWidget(EmptyState("暂无会话", "从通讯录选择用户，或加入一个群聊"))
+            self.cards.addWidget(EmptyState("暂无会话", "从通讯录选择联系人，或加入一个群聊", "◇"))
             return
         for summary in visible:
             card = ConversationCard(summary)
-            card.activated.connect(self.selected)
+            card.set_selected(summary.key == self._selected_key)
+            card.activated.connect(self._activate)
+            self._cards[summary.key] = card
             self.cards.addWidget(card)
 
 
@@ -224,6 +246,8 @@ class DetailsScrim(QFrame):
 
 
 class ChatPane(QWidget):
+    conversation_list_requested = Signal()
+
     def __init__(self, service: ChatService, store: AppStore) -> None:
         super().__init__()
         configure_surface(self, "canvas")
@@ -241,8 +265,13 @@ class ChatPane(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         header = QWidget()
+        header.setObjectName("ChatHeader")
         header_row = QHBoxLayout(header)
         header_row.setContentsMargins(18, 12, 12, 12)
+        self.conversation_list_button = QPushButton("会话")
+        self.conversation_list_button.setObjectName("Ghost")
+        self.conversation_list_button.setAccessibleName("返回会话列表")
+        self.conversation_list_button.hide()
         self.avatar = Avatar("会话")
         labels = QVBoxLayout()
         self.title = QLabel("选择一个会话")
@@ -255,6 +284,7 @@ class ChatPane(QWidget):
         self.search_button.setObjectName("Ghost")
         self.details_button = QPushButton("详情")
         self.details_button.setObjectName("Ghost")
+        header_row.addWidget(self.conversation_list_button)
         header_row.addWidget(self.avatar)
         header_row.addLayout(labels)
         header_row.addStretch()
@@ -271,6 +301,8 @@ class ChatPane(QWidget):
         search_row.addWidget(search_action)
         self.search_panel.hide()
         self.search_results = QListWidget()
+        self.search_results.setObjectName("SearchResults")
+        self.search_results.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.search_results.setMaximumHeight(180)
         self.search_results.hide()
         self.scroll = QScrollArea()
@@ -287,11 +319,12 @@ class ChatPane(QWidget):
         composer_layout = QVBoxLayout(composer)
         composer_layout.setContentsMargins(14, 10, 14, 12)
         toolbar = QHBoxLayout()
+        toolbar.setSpacing(4)
         self.emoji = QPushButton("☺ 表情")
         self.image = QPushButton("图片")
         self.ai = QPushButton("✦ AI")
         for button in (self.emoji, self.image, self.ai):
-            button.setObjectName("Ghost")
+            button.setObjectName("ComposerTool")
             toolbar.addWidget(button)
         toolbar.addStretch()
         input_row = QHBoxLayout()
@@ -301,11 +334,14 @@ class ChatPane(QWidget):
         self.mention_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.mention_list.hide()
         self.compose = MentionTextEdit()
+        self.compose.setObjectName("ComposerInput")
         self.compose.setPlaceholderText("输入 @ 选择群成员或 AI Agent")
-        self.compose.setMaximumHeight(110)
+        self.compose.setMinimumHeight(68)
+        self.compose.setMaximumHeight(104)
         self.send = QPushButton("发送")
         self.send.setObjectName("Primary")
         self.send.setFixedWidth(88)
+        self.send.setMinimumHeight(42)
         input_row.addWidget(self.compose, 1)
         input_row.addWidget(self.send)
         composer_layout.addLayout(toolbar)
@@ -331,6 +367,7 @@ class ChatPane(QWidget):
         self.details_button.clicked.connect(self._toggle_details)
         self.details.close_requested.connect(self._hide_details)
         self.details_scrim.clicked.connect(self._hide_details)
+        self.conversation_list_button.clicked.connect(self.conversation_list_requested)
         self.compose.mention_query.connect(self._show_mentions)
         self.compose.mention_closed.connect(self._hide_mentions)
         self.compose.mention_key.connect(self._mention_key)
@@ -367,7 +404,7 @@ class ChatPane(QWidget):
         self.key = key
         self.title_text = title
         self.title.setText(title)
-        self.subtitle.setText("群聊" if key.kind == "group" else "私聊")
+        self._refresh_subtitle()
         self.avatar.set_avatar(title)
         self._hide_mentions()
         self._hide_details()
@@ -394,7 +431,10 @@ class ChatPane(QWidget):
             bubble.recall_requested.connect(self.service.recall)
             bubble.media_requested.connect(self.service.fetch_media)
             is_agent = message.get("sender_kind") == "agent" or message.get("message_type") == "agent"
-            sender_id = int(message.get("sender_id", 0) or 0)
+            try:
+                sender_id = 0 if is_agent else int(message.get("sender_id", 0) or 0)
+            except (TypeError, ValueError):
+                sender_id = 0
             sender_name = "AI Agent" if is_agent else str(message.get("sender_name", "未知用户"))
             fallback = {
                 "id": sender_id,
@@ -439,8 +479,24 @@ class ChatPane(QWidget):
             for item in state.search_results.get(self.key, []):
                 content = str(item.get("content", ""))
                 self.search_results.addItem(f"{item.get('sender_name', '')}: {content}")
-            self.search_results.setVisible(self.search_results.count() > 0)
-        self.subtitle.setText(("群聊" if self.key and self.key.kind == "group" else "私聊") + (" · Agent 在线" if state.agent_online else " · Agent 离线")) if self.key else None
+            if not self.search_results.count():
+                self._set_search_status("未找到匹配消息")
+            self.search_results.show()
+        elif topic == "error" and self.search_panel.isVisible() and state.last_error:
+            self._set_search_status(f"搜索失败：{state.last_error}")
+            self.search_results.show()
+        self._refresh_subtitle()
+
+    def _refresh_subtitle(self) -> None:
+        if not self.key:
+            return
+        parts = ["群聊" if self.key.kind == "group" else "私聊"]
+        if self.key.kind == "group":
+            member_count = len(self._members())
+            if member_count:
+                parts.append(f"{member_count} 位成员")
+        parts.append("Agent 在线" if self.store.state.agent_online else "Agent 离线")
+        self.subtitle.setText(" · ".join(parts))
 
     def _show_message_profile(self, profile: object, anchor: QWidget) -> None:
         self.profile_popover.show_for(anchor, profile)
@@ -482,8 +538,18 @@ class ChatPane(QWidget):
             self.details.show()
 
     def resizeEvent(self, event: Any) -> None:
+        stick_to_bottom = False
+        if hasattr(self, "scroll"):
+            bar = self.scroll.verticalScrollBar()
+            stick_to_bottom = bar.value() >= bar.maximum() - 24
         super().resizeEvent(event)
         self._layout_details()
+        if stick_to_bottom:
+            QTimer.singleShot(0, self._scroll_to_bottom)
+
+    def _scroll_to_bottom(self) -> None:
+        bar = self.scroll.verticalScrollBar()
+        bar.setValue(bar.maximum())
 
     def _send(self) -> None:
         if not self.key:
@@ -509,7 +575,7 @@ class ChatPane(QWidget):
         self.mention_list.clear()
         for member in candidates:
             item = QListWidgetItem(str(member.get("username", "")))
-            item.setSizeHint(QSize(0, 38))
+            item.setSizeHint(QSize(0, 44))
             item.setData(Qt.ItemDataRole.UserRole, dict(member))
             is_agent = member.get("kind") == "agent"
             profile = self.service.profile(None if is_agent else int(member.get("id", 0) or 0), member)
@@ -520,7 +586,7 @@ class ChatPane(QWidget):
             self.mention_list.addItem(item)
         visible = self.mention_list.count() > 0
         if visible:
-            self.mention_list.setFixedHeight(min(210, self.mention_list.count() * 38 + 4))
+            self.mention_list.setFixedHeight(min(210, self.mention_list.count() * 44 + 4))
         self.mention_list.setVisible(visible)
         self.compose.mention_popup_active = visible
         if visible:
@@ -565,7 +631,17 @@ class ChatPane(QWidget):
 
     def _search(self) -> None:
         if self.key and self.search_input.text().strip():
+            self._set_search_status("正在搜索…")
+            self.search_results.show()
             self.service.search(self.key, self.search_input.text().strip())
+
+    def _set_search_status(self, text: str) -> None:
+        self.search_results.clear()
+        item = QListWidgetItem(text)
+        item.setFlags(Qt.ItemFlag.NoItemFlags)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        item.setSizeHint(QSize(0, 44))
+        self.search_results.addItem(item)
 
     def _send_image(self) -> None:
         if not self.key:
@@ -584,6 +660,7 @@ class ChatPane(QWidget):
 
 class ContactsPage(QWidget):
     conversation_requested = Signal(object, str)
+    COMPACT_BREAKPOINT = 720
 
     def __init__(self, service: ChatService) -> None:
         super().__init__()
@@ -592,29 +669,50 @@ class ContactsPage(QWidget):
         self.current_user_id = 0
         self._selected_user: dict[str, Any] | None = None
         self._selected_group: dict[str, Any] | None = None
+        self._compact_detail_open = False
+        self._users: list[dict[str, Any]] = []
+        self._groups: list[dict[str, Any]] = []
         root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(6)
         title = QLabel("通讯录")
         title.setObjectName("PageTitle")
-        subtitle = QLabel("联系人、群聊与资料")
+        subtitle = QLabel("查找联系人与群聊，查看资料后开始协作")
         subtitle.setObjectName("Muted")
         body = QHBoxLayout()
         body.setSpacing(12)
-        directory = QFrame()
-        directory.setObjectName("Surface")
-        directory.setFixedWidth(330)
-        directory_layout = QVBoxLayout(directory)
+        self.directory = QFrame()
+        self.directory.setObjectName("Surface")
+        self.directory.setMinimumWidth(280)
+        self.directory.setMaximumWidth(340)
+        directory_layout = QVBoxLayout(self.directory)
         directory_layout.setContentsMargins(12, 12, 12, 12)
+        directory_layout.setSpacing(8)
+        self.search = QLineEdit()
+        self.search.setObjectName("DirectorySearch")
+        self.search.setPlaceholderText("搜索联系人")
         tabs = QHBoxLayout()
+        tabs.setSpacing(4)
         self.people_tab = QPushButton("联系人")
         self.groups_tab = QPushButton("群聊")
+        self.tab_group = QButtonGroup(self)
+        self.tab_group.setExclusive(True)
         for button in (self.people_tab, self.groups_tab):
+            button.setObjectName("SegmentedTab")
             button.setCheckable(True)
+            self.tab_group.addButton(button)
             tabs.addWidget(button)
         self.people_tab.setChecked(True)
+        self.directory_status = QLabel("")
+        self.directory_status.setObjectName("DirectoryStatus")
+        self.directory_status.hide()
+        directory_layout.addWidget(self.search)
         directory_layout.addLayout(tabs)
+        directory_layout.addWidget(self.directory_status)
         self.directory_stack = QStackedWidget()
         self.users = QListWidget()
         self.users.setObjectName("DirectoryList")
+        self.users.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         groups_page = QWidget()
         groups_layout = QVBoxLayout(groups_page)
         groups_layout.setContentsMargins(0, 0, 0, 0)
@@ -626,14 +724,25 @@ class ContactsPage(QWidget):
         group_heading.addWidget(create)
         self.groups = QListWidget()
         self.groups.setObjectName("DirectoryList")
+        self.groups.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         groups_layout.addLayout(group_heading)
         groups_layout.addWidget(self.groups)
         self.directory_stack.addWidget(self.users)
         self.directory_stack.addWidget(groups_page)
         directory_layout.addWidget(self.directory_stack, 1)
 
+        self.details_host = QWidget()
+        configure_surface(self.details_host, "canvas")
+        details_layout = QVBoxLayout(self.details_host)
+        details_layout.setContentsMargins(0, 0, 0, 0)
+        details_layout.setSpacing(6)
+        self.directory_back = QPushButton("返回通讯录")
+        self.directory_back.setObjectName("Ghost")
+        self.directory_back.setAccessibleName("返回通讯录列表")
+        self.directory_back.hide()
         self.details = QStackedWidget()
-        self.empty_details = EmptyState("选择联系人或群聊", "查看资料并开始会话")
+        self.details.setObjectName("ContactDetails")
+        self.empty_details = EmptyState("选择联系人或群聊", "查看资料、在线状态与可用操作", "◇")
         self.user_profile = UserProfileCard(service)
         self.user_profile.action_requested.connect(self._profile_action)
         self.group_profile = QFrame()
@@ -664,11 +773,15 @@ class ContactsPage(QWidget):
         group_detail.addStretch()
         for page in (self.empty_details, self.user_profile, self.group_profile):
             self.details.addWidget(page)
-        body.addWidget(directory)
-        body.addWidget(self.details, 1)
+        details_layout.addWidget(self.directory_back, alignment=Qt.AlignmentFlag.AlignLeft)
+        details_layout.addWidget(self.details, 1)
+        body.addWidget(self.directory)
+        body.addWidget(self.details_host, 1)
         root.addWidget(title)
         root.addWidget(subtitle)
         root.addLayout(body, 1)
+        self.search.textChanged.connect(self._filter_directory)
+        self.directory_back.clicked.connect(self._show_compact_directory)
         self.people_tab.clicked.connect(lambda: self._set_tab(0))
         self.groups_tab.clicked.connect(lambda: self._set_tab(1))
         self.users.itemClicked.connect(self._select_user)
@@ -683,22 +796,14 @@ class ContactsPage(QWidget):
         self.directory_stack.setCurrentIndex(index)
         self.people_tab.setChecked(index == 0)
         self.groups_tab.setChecked(index == 1)
+        self.search.setPlaceholderText("搜索联系人" if index == 0 else "搜索群聊")
+        self._filter_directory(self.search.text())
 
     def update_state(self, topic: str, state: AppState) -> None:
         self.current_user_id = int(state.current_user.get("id", 0) or 0)
         if topic in {"auth", "contacts", "profile", "avatar"}:
-            self.users.clear()
-            my_id = str(state.current_user.get("id", ""))
-            for user in state.users:
-                if str(user.get("id")) == my_id:
-                    continue
-                profile = self.service.profile(int(user.get("id", 0) or 0), user)
-                item = QListWidgetItem(str(user.get("username", "")))
-                item.setData(Qt.ItemDataRole.UserRole, dict(user))
-                avatar = UserAvatar(self.service, profile, 30)
-                item.setIcon(QIcon(avatar.pixmap()))
-                item.setToolTip("在线" if user.get("online") else "离线")
-                self.users.addItem(item)
+            self._users = [dict(user) for user in state.users]
+            self._populate_users(self.search.text())
             if self._selected_user:
                 current = next(
                     (user for user in state.users if str(user.get("id")) == str(self._selected_user.get("id"))),
@@ -708,11 +813,8 @@ class ContactsPage(QWidget):
                 profile = self.service.profile(int(current.get("id", 0) or 0), current)
                 self.user_profile.set_profile(profile, primary_action="message", primary_label="发消息")
         if topic in {"auth", "groups"}:
-            self.groups.clear()
-            joined = [group for group in state.groups if group.get("joined")]
-            available = [group for group in state.groups if not group.get("joined")]
-            self._add_group_section("我的群聊", joined)
-            self._add_group_section("可加入群聊", available)
+            self._groups = [dict(group) for group in state.groups]
+            self._populate_groups(self.search.text())
             if self._selected_group:
                 current = next(
                     (group for group in state.groups if str(group.get("id")) == str(self._selected_group.get("id"))),
@@ -723,6 +825,67 @@ class ContactsPage(QWidget):
                 else:
                     self._selected_group = None
                     self.details.setCurrentWidget(self.empty_details)
+        if topic in {"auth", "contacts", "groups", "pending", "error"}:
+            directory_pending = any(
+                action in {"presence.list", "group.list", "group.create", "group.join", "group.leave"}
+                for action in state.pending.values()
+            )
+            if directory_pending:
+                self.directory_status.setText("正在更新通讯录…")
+            elif topic == "error" and state.last_error:
+                self.directory_status.setText(f"更新失败：{state.last_error}")
+            else:
+                self.directory_status.clear()
+            self.directory_status.setVisible(bool(self.directory_status.text()))
+
+    def _filter_directory(self, keyword: str) -> None:
+        if self.directory_stack.currentIndex() == 0:
+            self._populate_users(keyword)
+        else:
+            self._populate_groups(keyword)
+
+    def _populate_users(self, keyword: str) -> None:
+        self.users.clear()
+        clean = keyword.strip().casefold()
+        my_id = str(self.current_user_id or "")
+        visible = [
+            user for user in self._users
+            if str(user.get("id")) != my_id and clean in str(user.get("username", "")).casefold()
+        ]
+        for user in visible:
+            profile = self.service.profile(int(user.get("id", 0) or 0), user)
+            status = "在线" if user.get("online") else "离线"
+            item = QListWidgetItem(f"{user.get('username', '')}\n{status}")
+            item.setSizeHint(QSize(0, 52))
+            item.setData(Qt.ItemDataRole.UserRole, dict(user))
+            avatar = UserAvatar(self.service, profile, 32)
+            item.setIcon(QIcon(avatar.pixmap()))
+            item.setToolTip(status)
+            self.users.addItem(item)
+        if not visible:
+            self._add_directory_empty(self.users, "未找到联系人" if clean else "暂无联系人")
+
+    def _populate_groups(self, keyword: str) -> None:
+        self.groups.clear()
+        clean = keyword.strip().casefold()
+        visible = [group for group in self._groups if clean in str(group.get("name", "")).casefold()]
+        joined = [group for group in visible if group.get("joined")]
+        available = [group for group in visible if not group.get("joined")]
+        if joined:
+            self._add_group_section("我的群聊", joined)
+        if available:
+            self._add_group_section("可加入群聊", available)
+        if not visible:
+            self._add_directory_empty(self.groups, "未找到群聊" if clean else "暂无群聊")
+
+    @staticmethod
+    def _add_directory_empty(widget: QListWidget, text: str) -> None:
+        item = QListWidgetItem(text)
+        item.setFlags(Qt.ItemFlag.NoItemFlags)
+        item.setData(Qt.ItemDataRole.UserRole, None)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        item.setSizeHint(QSize(0, 52))
+        widget.addItem(item)
 
     def _add_group_section(self, title: str, groups: list[dict[str, Any]]) -> None:
         header = QListWidgetItem(title)
@@ -730,7 +893,10 @@ class ContactsPage(QWidget):
         header.setData(Qt.ItemDataRole.UserRole, None)
         self.groups.addItem(header)
         for group in groups:
-            item = QListWidgetItem(str(group.get("name", "")))
+            member_count = int(group.get("member_count", 0) or 0)
+            meta = f"{member_count} 位成员" if member_count else ("已加入" if group.get("joined") else "可加入")
+            item = QListWidgetItem(f"{group.get('name', '')}\n{meta}")
+            item.setSizeHint(QSize(0, 52))
             item.setIcon(QIcon(Avatar(str(group.get("name", "")), 30).pixmap()))
             item.setData(Qt.ItemDataRole.UserRole, dict(group))
             self.groups.addItem(item)
@@ -744,12 +910,14 @@ class ContactsPage(QWidget):
         profile = self.service.profile(int(user.get("id", 0) or 0), user)
         self.user_profile.set_profile(profile, primary_action="message", primary_label="发消息")
         self.details.setCurrentWidget(self.user_profile)
+        self._open_compact_detail()
 
     def _select_group(self, item: QListWidgetItem) -> None:
         group = item.data(Qt.ItemDataRole.UserRole)
         if not isinstance(group, dict):
             return
         self._show_group_profile(group)
+        self._open_compact_detail()
 
     def _show_group_profile(self, group: dict[str, Any]) -> None:
         self._selected_group = group
@@ -763,8 +931,41 @@ class ContactsPage(QWidget):
         self.group_more.setVisible(can_leave)
         self.details.setCurrentWidget(self.group_profile)
 
+    def _open_compact_detail(self) -> None:
+        if self.width() < self.COMPACT_BREAKPOINT:
+            self._compact_detail_open = True
+            self._apply_responsive_layout()
+
+    def _show_compact_directory(self) -> None:
+        self._compact_detail_open = False
+        self._apply_responsive_layout()
+
+    def _apply_responsive_layout(self) -> None:
+        compact = self.width() < self.COMPACT_BREAKPOINT
+        self.directory_back.setVisible(compact and self._compact_detail_open)
+        if not compact:
+            self.directory.setMinimumWidth(280)
+            self.directory.setMaximumWidth(340)
+            self.directory.show()
+            self.details_host.show()
+            return
+        if self._compact_detail_open:
+            self.directory.hide()
+            self.details_host.show()
+        else:
+            self.directory.setMinimumWidth(0)
+            self.directory.setMaximumWidth(16_777_215)
+            self.directory.show()
+            self.details_host.hide()
+
+    def resizeEvent(self, event: Any) -> None:
+        super().resizeEvent(event)
+        self._apply_responsive_layout()
+
     def _open_user(self, item: QListWidgetItem) -> None:
         user = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(user, dict):
+            return
         peer_id = int(user["id"])
         low, high = sorted((self.current_user_id, peer_id))
         self.conversation_requested.emit(
@@ -773,6 +974,8 @@ class ContactsPage(QWidget):
 
     def _open_group(self, item: QListWidgetItem) -> None:
         group = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(group, dict):
+            return
         if group.get("joined"):
             self.conversation_requested.emit(ConversationKey("group", str(group["id"])), str(group["name"]))
         else:
@@ -1194,12 +1397,14 @@ class SettingsPage(QWidget):
 
 class Workspace(QWidget):
     logout_requested = Signal()
+    CHAT_SPLIT_BREAKPOINT = 1040
 
     def __init__(self, service: ChatService, store: AppStore, host: str, port: int) -> None:
         super().__init__()
         configure_surface(self, "canvas")
         self.service = service
         self.store = store
+        self._compact_list_open = False
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(10)
@@ -1227,24 +1432,25 @@ class Workspace(QWidget):
                 rail_layout.addStretch()
         self.nav_buttons[0].setChecked(True)
         self.pages = QStackedWidget()
-        chat_root = QWidget()
-        configure_surface(chat_root, "canvas")
-        chat_layout = QHBoxLayout(chat_root)
-        chat_layout.setContentsMargins(0, 0, 0, 0)
-        chat_layout.setSpacing(10)
+        self.chat_root = QWidget()
+        configure_surface(self.chat_root, "canvas")
+        self.chat_layout = QHBoxLayout(self.chat_root)
+        self.chat_layout.setContentsMargins(0, 0, 0, 0)
+        self.chat_layout.setSpacing(10)
         self.conversations = ConversationPane()
         self.chat = ChatPane(service, store)
-        chat_layout.addWidget(self.conversations)
-        chat_layout.addWidget(self.chat, 1)
+        self.chat_layout.addWidget(self.conversations)
+        self.chat_layout.addWidget(self.chat, 1)
         self.contacts = ContactsPage(service)
         self.ai = AICenterPage(service, store)
         self.admin = AdminPage()
         self.settings = SettingsPage(service, store, host, port)
-        for page in (chat_root, self.contacts, self.ai, self.admin, self.settings):
+        for page in (self.chat_root, self.contacts, self.ai, self.admin, self.settings):
             self.pages.addWidget(page)
         root.addWidget(self.rail)
         root.addWidget(self.pages, 1)
         self.conversations.selected.connect(self._select_conversation)
+        self.chat.conversation_list_requested.connect(self._show_compact_conversations)
         self.contacts.conversation_requested.connect(self._open_from_contacts)
         self.ai.result_requested.connect(self._open_ai_result)
         self.settings.logout_requested.connect(self.logout_requested)
@@ -1253,15 +1459,46 @@ class Workspace(QWidget):
         self.pages.setCurrentIndex(index)
         if 0 <= index < len(self.nav_buttons):
             self.nav_buttons[index].setChecked(True)
+        if index == 0:
+            self._apply_chat_layout()
 
     def _select_conversation(self, key: ConversationKey) -> None:
+        self.conversations.set_selected(key)
         summary = next((item for item in self.store.state.conversations if item.key == key), None)
         self._open_from_contacts(key, summary.title if summary else "会话")
 
     def _open_from_contacts(self, key: ConversationKey, title: str) -> None:
         self._navigate(0)
+        self.conversations.set_selected(key)
         self.chat.set_conversation(key, title)
+        self._compact_list_open = False
+        self._apply_chat_layout()
         self.service.open_conversation(key)
+
+    def _show_compact_conversations(self) -> None:
+        if self.width() >= self.CHAT_SPLIT_BREAKPOINT:
+            return
+        self._compact_list_open = True
+        self._apply_chat_layout()
+
+    def _apply_chat_layout(self) -> None:
+        compact = self.width() < self.CHAT_SPLIT_BREAKPOINT
+        self.chat.conversation_list_button.setVisible(compact)
+        if not compact:
+            self._compact_list_open = False
+            self.conversations.setMinimumWidth(280)
+            self.conversations.setMaximumWidth(340)
+            self.conversations.show()
+            self.chat.show()
+            return
+        if self._compact_list_open:
+            self.conversations.setMinimumWidth(0)
+            self.conversations.setMaximumWidth(16_777_215)
+            self.conversations.show()
+            self.chat.hide()
+        else:
+            self.conversations.hide()
+            self.chat.show()
 
     def _open_ai_result(self, key: ConversationKey, message_id: int) -> None:
         summary = next((item for item in self.store.state.conversations if item.key == key), None)
@@ -1273,12 +1510,13 @@ class Workspace(QWidget):
         self.nav_buttons[3].setVisible(state.current_user.get("role") == "admin")
         if topic in {"auth", "conversations"}:
             self.conversations.set_conversations(state.conversations)
+            self.conversations.set_selected(state.current_conversation)
         for page in (self.chat, self.contacts, self.ai, self.admin, self.settings):
             page.update_state(topic, state)
 
     def resizeEvent(self, event: Any) -> None:
         super().resizeEvent(event)
-        self.conversations.setVisible(self.width() >= 860 or self.pages.currentIndex() != 0)
+        self._apply_chat_layout()
 
 
 class MainWindow(QMainWindow):

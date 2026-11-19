@@ -546,25 +546,30 @@ class ConversationCard(QFrame):
         self.summary = summary
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setObjectName("ConversationCard")
-        self.setFixedHeight(72)
+        self.setProperty("selected", False)
+        self.setFixedHeight(64)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         row = QHBoxLayout(self)
-        row.setContentsMargins(10, 9, 10, 9)
+        row.setContentsMargins(10, 6, 10, 6)
         row.setSpacing(10)
-        row.addWidget(Avatar(summary.title))
+        row.addWidget(Avatar(summary.title, 36))
         text = QVBoxLayout()
         top = QHBoxLayout()
         title = QLabel(summary.title)
         title.setObjectName("ConversationTitle")
+        title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         top.addWidget(title)
         top.addStretch()
         clock = QLabel(time.strftime("%H:%M", time.localtime(summary.timestamp)) if summary.timestamp else "")
         clock.setObjectName("ConversationTime")
+        clock.setFixedWidth(42)
+        clock.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         top.addWidget(clock)
         text.addLayout(top)
         bottom = QHBoxLayout()
         preview = QLabel(summary.preview or ("群聊" if summary.key.kind == "group" else "开始聊天"))
         preview.setObjectName("Muted")
+        preview.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         preview.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         bottom.addWidget(preview, 1)
         if summary.unread_count:
@@ -576,9 +581,18 @@ class ConversationCard(QFrame):
         text.addLayout(bottom)
         row.addLayout(text, 1)
 
+    def set_selected(self, selected: bool) -> None:
+        if bool(self.property("selected")) == selected:
+            return
+        self.setProperty("selected", selected)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
     def mousePressEvent(self, event: Any) -> None:
         super().mousePressEvent(event)
-        self.activated.emit(self.summary.key)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.activated.emit(self.summary.key)
 
 
 class MessageBubble(QFrame):
@@ -591,7 +605,11 @@ class MessageBubble(QFrame):
         self.mine = mine
         self.setObjectName("MessageBubble")
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
-        self.agent = message.get("message_type") == "agent" or str(message.get("sender_name", "")).lower() == "agent"
+        self.agent = (
+            message.get("message_type") == "agent"
+            or message.get("sender_kind") == "agent"
+            or str(message.get("sender_name", "")).lower() in {"agent", "ai agent"}
+        )
         self._raw_content = str(message.get("content", message.get("text", "")))
         self._content_format = str(message.get("content_format", "plain"))
         self.setProperty("messageRole", "agent" if self.agent else "outgoing" if mine else "incoming")
@@ -614,6 +632,7 @@ class MessageBubble(QFrame):
             layout.addWidget(content)
         elif message.get("message_type") == "image":
             image = QLabel()
+            image.setObjectName("MessageImage")
             image.setAlignment(Qt.AlignmentFlag.AlignCenter)
             raw = message.get("image_data")
             if raw:
@@ -698,11 +717,11 @@ class MessageBubble(QFrame):
 
 
 class EmptyState(QWidget):
-    def __init__(self, title: str, description: str) -> None:
+    def __init__(self, title: str, description: str, icon_text: str = "💬") -> None:
         super().__init__()
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon = QLabel("💬")
+        icon = QLabel(icon_text)
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon.setObjectName("EmptyStateIcon")
         heading = QLabel(title)
