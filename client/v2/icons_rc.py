@@ -1,0 +1,176 @@
+# Resource object code (Python 3)
+# Created by: object code
+# Created by: The Resource Compiler for Qt version 6.12.0
+# WARNING! All changes made in this file will be lost!
+
+from PySide6 import QtCore
+
+qt_resource_data = b"\
+\x00\x00\x01f\
+<\
+svg xmlns=\x22http:\
+//www.w3.org/200\
+0/svg\x22 width=\x2224\
+\x22 height=\x2224\x22 vi\
+ewBox=\x220 0 24 24\
+\x22 fill=\x22none\x22 st\
+roke=\x22currentCol\
+or\x22 stroke-width\
+=\x222\x22 stroke-line\
+cap=\x22round\x22 stro\
+ke-linejoin=\x22rou\
+nd\x22>\x0a  <path d=\x22\
+M16 21v-2a4 4 0 \
+0 0-4-4H6a4 4 0 \
+0 0-4 4v2\x22/>\x0a  <\
+circle cx=\x229\x22 cy\
+=\x227\x22 r=\x224\x22/>\x0a  <\
+path d=\x22M22 21v-\
+2a4 4 0 0 0-3-3.\
+87\x22/>\x0a  <path d=\
+\x22M16 3.13a4 4 0 \
+0 1 0 7.75\x22/>\x0a</\
+svg>\x0a\
+\x00\x00\x00\xea\
+<\
+svg xmlns=\x22http:\
+//www.w3.org/200\
+0/svg\x22 width=\x2224\
+\x22 height=\x2224\x22 vi\
+ewBox=\x220 0 24 24\
+\x22 fill=\x22none\x22 st\
+roke=\x22currentCol\
+or\x22 stroke-width\
+=\x222\x22 stroke-line\
+cap=\x22round\x22 stro\
+ke-linejoin=\x22rou\
+nd\x22>\x0a  <path d=\x22\
+M7.9 20A9 9 0 1 \
+0 4 16.1L2 22Z\x22/\
+>\x0a</svg>\x0a\
+\x00\x00\x01-\
+<\
+svg xmlns=\x22http:\
+//www.w3.org/200\
+0/svg\x22 width=\x2224\
+\x22 height=\x2224\x22 vi\
+ewBox=\x220 0 24 24\
+\x22 fill=\x22none\x22 st\
+roke=\x22currentCol\
+or\x22 stroke-width\
+=\x222\x22 stroke-line\
+cap=\x22round\x22 stro\
+ke-linejoin=\x22rou\
+nd\x22>\x0a  <path d=\x22\
+M20 7h-9\x22/>\x0a  <p\
+ath d=\x22M14 17H5\x22\
+/>\x0a  <circle cx=\
+\x2217\x22 cy=\x2217\x22 r=\x22\
+3\x22/>\x0a  <circle c\
+x=\x227\x22 cy=\x227\x22 r=\x22\
+3\x22/>\x0a</svg>\x0a\
+\x00\x00\x01{\
+<\
+svg xmlns=\x22http:\
+//www.w3.org/200\
+0/svg\x22 width=\x2224\
+\x22 height=\x2224\x22 vi\
+ewBox=\x220 0 24 24\
+\x22 fill=\x22none\x22 st\
+roke=\x22currentCol\
+or\x22 stroke-width\
+=\x222\x22 stroke-line\
+cap=\x22round\x22 stro\
+ke-linejoin=\x22rou\
+nd\x22>\x0a  <rect wid\
+th=\x2218\x22 height=\x22\
+10\x22 x=\x223\x22 y=\x2211\x22\
+ rx=\x222\x22/>\x0a  <cir\
+cle cx=\x2212\x22 cy=\x22\
+5\x22 r=\x222\x22/>\x0a  <pa\
+th d=\x22M12 7v4\x22/>\
+\x0a  <line x1=\x228\x22 \
+x2=\x228\x22 y1=\x2216\x22 y\
+2=\x2216\x22/>\x0a  <line\
+ x1=\x2216\x22 x2=\x2216\x22\
+ y1=\x2216\x22 y2=\x2216\x22\
+/>\x0a</svg>\x0a\
+\x00\x00\x01n\
+<\
+svg xmlns=\x22http:\
+//www.w3.org/200\
+0/svg\x22 width=\x2224\
+\x22 height=\x2224\x22 vi\
+ewBox=\x220 0 24 24\
+\x22 fill=\x22none\x22 st\
+roke=\x22currentCol\
+or\x22 stroke-width\
+=\x222\x22 stroke-line\
+cap=\x22round\x22 stro\
+ke-linejoin=\x22rou\
+nd\x22>\x0a  <path d=\x22\
+M20 13c0 5-3.5 7\
+.5-7.66 8.95a1 1\
+ 0 0 1-.68-.01C7\
+.5 20.5 4 18 4 1\
+3V6a1 1 0 0 1 1-\
+1c2 0 4.5-1.2 6.\
+24-2.72a1.17 1.1\
+7 0 0 1 1.52 0C1\
+4.51 3.81 17 5 1\
+9 5a1 1 0 0 1 1 \
+1z\x22/>\x0a</svg>\x0a\
+"
+
+qt_resource_name = b"\
+\x00\x05\
+\x00o\xa6S\
+\x00i\
+\x00c\x00o\x00n\x00s\
+\x00\x09\
+\x0c\x96\xa3\xe7\
+\x00u\
+\x00s\x00e\x00r\x00s\x00.\x00s\x00v\x00g\
+\x00\x12\
+\x00U\xbe'\
+\x00m\
+\x00e\x00s\x00s\x00a\x00g\x00e\x00-\x00c\x00i\x00r\x00c\x00l\x00e\x00.\x00s\x00v\
+\x00g\
+\x00\x0e\
+\x0fsMg\
+\x00s\
+\x00e\x00t\x00t\x00i\x00n\x00g\x00s\x00-\x002\x00.\x00s\x00v\x00g\
+\x00\x07\
+\x09gZ\x07\
+\x00b\
+\x00o\x00t\x00.\x00s\x00v\x00g\
+\x00\x0a\
+\x0c(g'\
+\x00s\
+\x00h\x00i\x00e\x00l\x00d\x00.\x00s\x00v\x00g\
+"
+
+qt_resource_struct = b"\
+\x00\x00\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x01\
+\x00\x00\x00\x00\x00\x00\x00\x00\
+\x00\x00\x00\x00\x00\x02\x00\x00\x00\x05\x00\x00\x00\x02\
+\x00\x00\x00\x00\x00\x00\x00\x00\
+\x00\x00\x00(\x00\x00\x00\x00\x00\x01\x00\x00\x01j\
+\x00\x00\x01\xa1\xf3?\x93A\
+\x00\x00\x00t\x00\x00\x00\x00\x00\x01\x00\x00\x03\x89\
+\x00\x00\x01\xa1\xf3?\x93^\
+\x00\x00\x00\x88\x00\x00\x00\x00\x00\x01\x00\x00\x05\x08\
+\x00\x00\x01\xa1\xf3?\x93l\
+\x00\x00\x00\x10\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\
+\x00\x00\x01\xa1\xf3?\x93P\
+\x00\x00\x00R\x00\x00\x00\x00\x00\x01\x00\x00\x02X\
+\x00\x00\x01\xa1\xf3?\x93z\
+"
+
+def qInitResources():
+    QtCore.qRegisterResourceData(0x03, qt_resource_struct, qt_resource_name, qt_resource_data)
+
+def qCleanupResources():
+    QtCore.qUnregisterResourceData(0x03, qt_resource_struct, qt_resource_name, qt_resource_data)
+
+qInitResources()

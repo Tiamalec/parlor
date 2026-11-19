@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -44,6 +45,7 @@ from client.network import NetworkClient
 from client.service import ChatService
 from client.store import AppStore
 
+from .icons import NAVIGATION_ICONS, lucide_icon
 from .theme import ThemeMode, ThemeSnapshot, active_theme_manager, install_theme_manager
 from .details import ConversationDetailsPanel
 from .profile_widgets import ProfilePopover, UserProfileCard
@@ -1785,6 +1787,47 @@ class SettingsPage(QWidget):
         self.settings_stack.setMaximumWidth(16_777_215 if compact else 760)
 
 
+class NavigationButton(QToolButton):
+    """Compact rail item with a themeable icon and optional unread badge."""
+
+    def __init__(self, label: str, icon_name: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.icon_name = icon_name
+        self.setObjectName("NavItem")
+        self.setText(label)
+        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+        self.setIconSize(QSize(20, 20))
+        self.setFixedHeight(56)
+        self.setCheckable(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setToolTip(label)
+        self.setAccessibleName(label)
+        self.badge = QLabel(self)
+        self.badge.setObjectName("NavBadge")
+        self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.badge.hide()
+        self.refresh_icon()
+
+    def refresh_icon(self) -> None:
+        self.setIcon(lucide_icon(self.icon_name, 20))
+
+    def set_badge(self, count: int) -> None:
+        count = max(0, int(count))
+        self.badge.setText("99+" if count > 99 else str(count))
+        self.badge.setVisible(count > 0)
+        self.setAccessibleDescription(f"{count} 条未读消息" if count else "")
+        self.badge.adjustSize()
+        self._position_badge()
+
+    def _position_badge(self) -> None:
+        self.badge.move(self.width() - self.badge.width() - 5, 3)
+
+    def resizeEvent(self, event: Any) -> None:
+        super().resizeEvent(event)
+        self._position_badge()
+
+
 class Workspace(QWidget):
     logout_requested = Signal()
     CHAT_SPLIT_BREAKPOINT = 1040
@@ -1797,30 +1840,35 @@ class Workspace(QWidget):
         self._compact_list_open = False
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(10)
+        root.setSpacing(8)
         self.rail = QFrame()
         self.rail.setObjectName("Rail")
-        self.rail.setFixedWidth(78)
+        self.rail.setFixedWidth(76)
         rail_layout = QVBoxLayout(self.rail)
-        rail_layout.setContentsMargins(8, 12, 8, 12)
-        logo = QLabel("✦")
-        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo.setObjectName("BrandMark")
-        rail_layout.addWidget(logo)
+        rail_layout.setContentsMargins(6, 12, 6, 12)
+        rail_layout.setSpacing(4)
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
-        self.nav_buttons: list[QPushButton] = []
-        for index, (icon, label) in enumerate((("💬", "消息"), ("👥", "通讯"), ("✦", "AI"), ("🛡", "管理"), ("⚙", "设置"))):
-            button = QPushButton(f"{icon}\n{label}")
-            button.setObjectName("Nav")
-            button.setCheckable(True)
+        self.nav_buttons: list[NavigationButton] = []
+        navigation = (
+            ("messages", "消息"),
+            ("contacts", "通讯"),
+            ("ai", "AI"),
+            ("admin", "管理"),
+            ("settings", "设置"),
+        )
+        for index, (icon_key, label) in enumerate(navigation):
+            if index == 4:
+                rail_layout.addStretch(1)
+            button = NavigationButton(label, NAVIGATION_ICONS[icon_key], self.rail)
             button.clicked.connect(lambda _checked=False, page=index: self._navigate(page))
             self.nav_group.addButton(button)
             self.nav_buttons.append(button)
             rail_layout.addWidget(button)
-            if index == 2:
-                rail_layout.addStretch()
         self.nav_buttons[0].setChecked(True)
+        manager = active_theme_manager()
+        if manager is not None:
+            manager.themeChanged.connect(self._refresh_navigation_icons)
         self.pages = QStackedWidget()
         self.chat_root = QWidget()
         configure_surface(self.chat_root, "canvas")
@@ -1851,6 +1899,10 @@ class Workspace(QWidget):
             self.nav_buttons[index].setChecked(True)
         if index == 0:
             self._apply_chat_layout()
+
+    def _refresh_navigation_icons(self, *_args: object) -> None:
+        for button in self.nav_buttons:
+            button.refresh_icon()
 
     def _select_conversation(self, key: ConversationKey) -> None:
         self.conversations.set_selected(key)
@@ -1898,6 +1950,7 @@ class Workspace(QWidget):
 
     def update_state(self, topic: str, state: AppState) -> None:
         self.nav_buttons[3].setVisible(state.current_user.get("role") == "admin")
+        self.nav_buttons[0].set_badge(sum(max(0, item.unread_count) for item in state.conversations))
         if topic in {"auth", "conversations"}:
             self.conversations.set_conversations(state.conversations)
             self.conversations.set_selected(state.current_conversation)

@@ -202,7 +202,7 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QFrame#TaskRow:hover {{ background: {c.surface_subtle}; }}
     QFrame#SettingsSection {{ background: transparent; border: none; border-bottom: 1px solid {c.border}; }}
     QFrame#SettingsRow {{ background: transparent; border: none; }}
-    QFrame#Rail {{ background: {c.surface_subtle}; border: none; }}
+    QFrame#Rail {{ background: {c.surface}; border: none; border-right: 1px solid {c.border}; }}
     QFrame#DetailsScrim {{ background: {c.overlay_scrim}; border: none; }}
     QWidget#ChatHeader {{ background: {c.surface}; border-bottom: 1px solid {c.border}; }}
     QWidget#Composer {{ background: {c.surface}; border-top: 1px solid {c.border}; }}
@@ -214,8 +214,8 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QLabel#MetricValue {{ font-size: 26px; font-weight: 700; }}
     QLabel#EmptyStateIcon {{ font-size: 42px; }}
     QLabel#EmptyStateTitle {{ font-size: 18px; font-weight: 700; }}
-    QLabel#BrandMark {{ font-size: 25px; color: {c.primary}; font-weight: 700; }}
     QLabel#AuthBrandMark {{ font-size: 34px; color: {c.primary}; font-weight: 700; }}
+    QLabel#NavBadge {{ color: {c.surface}; background: {c.danger}; border: none; border-radius: 7px; min-width: 14px; min-height: 14px; padding: 0 3px; font-size: 9px; font-weight: 700; }}
     QLabel#TaskTitle {{ font-weight: 600; }}
     QLabel#TaskStatus {{ color: {c.text_secondary}; background: {c.surface_subtle}; border-radius: 6px; padding: 4px 8px; font-size: 12px; }}
     QLabel#TaskStatus[taskStatus="running"] {{ color: {c.warning}; }}
@@ -261,8 +261,13 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QPushButton#SegmentedTab {{ min-height: 32px; border: none; background: transparent; color: {c.text_secondary}; }}
     QPushButton#SegmentedTab:hover {{ background: {c.surface_subtle}; color: {c.text_primary}; }}
     QPushButton#SegmentedTab:checked {{ background: {c.primary_subtle}; color: {c.primary}; font-weight: 600; }}
-    QPushButton#Nav {{ border: none; background: transparent; min-height: 52px; border-radius: 10px; padding: 4px; }}
-    QPushButton#Nav:checked {{ color: {c.primary}; background: {c.surface}; font-weight: 600; }}
+    QToolButton#NavItem {{ color: {c.text_secondary}; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 4px 2px 3px 2px; font-size: 11px; font-weight: 400; }}
+    QToolButton#NavItem:hover {{ color: {c.text_primary}; background: {c.surface_subtle}; }}
+    QToolButton#NavItem:pressed {{ color: {c.primary_pressed}; background: {c.primary_subtle}; }}
+    QToolButton#NavItem:checked {{ color: {c.primary}; background: {c.primary_subtle}; font-weight: 600; }}
+    QToolButton#NavItem:checked:hover {{ color: {c.primary_hover}; background: {c.primary_subtle}; }}
+    QToolButton#NavItem:focus {{ border: 2px solid {c.primary}; }}
+    QToolButton#NavItem:disabled {{ color: {c.text_disabled}; background: transparent; }}
     QPushButton#DangerButton {{ color: {c.danger}; }}
     QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox {{ color: {c.text_primary}; background: {c.surface}; border: 1px solid {c.border}; border-radius: 8px; padding: 8px 10px; selection-background-color: {c.primary}; selection-color: {c.surface}; }}
     QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QComboBox:focus {{ border: 2px solid {c.primary}; }}

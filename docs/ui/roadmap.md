@@ -15,7 +15,7 @@
 | 1. 设计与主题架构冻结 | 完成 | 本目录四份设计规范 |
 | 2. 工程基线与背景泄漏修复 | 完成 | Git 基线、文档、语义表面修复、主题边界测试 |
 | 3. 主题基础设施 | 完成 | Light/Dark/System、ThemeManager、QPalette、QSS builder、富文本与自绘刷新 |
-| 4. 公共视觉组件 | 未开始 | Lucide、PageHeader、StatusBadge、导航等 |
+| 4. 公共视觉组件 | 进行中 | Lucide 导航资源与 Navigation Rail 已完成；其余公共组件按需迁移 |
 | 5. 页面迁移 | 进行中 | 聊天与通讯录已完成；AI、设置、管理页待迁移 |
 | 6. 清理与拆分 | 未开始 | application.py 渐进拆分、残余硬编码清理 |
 
@@ -92,6 +92,17 @@
 - 主题偏好仅存储于 `QSettings`；旧版本忽略该键，无数据迁移依赖。
 
 ## 阶段 4：公共视觉组件
+
+### Navigation Rail 完成记录（2026-11-19）
+
+- V2 左侧导航收敛为 76px 桌面 Navigation Rail，导航项固定 56px 高，图标为 20px、标签为 11px；移除无功能意义的顶部星形装饰。
+- 消息、通讯、AI 与管理员入口位于上部，设置入口通过布局伸缩固定底部；管理员入口继续沿用现有角色可见性逻辑。
+- 使用 Qt Resource 内置消息、通讯、AI、管理和设置五个精选 Lucide SVG，并按 ThemeTokens 动态生成 1x/2x DPR 的普通、悬停、选中和禁用图标。
+- 导航项提供 hover、pressed、checked、focus、disabled 状态、tooltip、accessibleName 和方向键切换；消息入口增加聚合未读数标记。
+- 页面索引、路由 Signal 与页面业务对象保持不变；运行时切换主题会刷新图标，但不会重建导航或丢失当前选中页面。
+- Qt offscreen 与真实 macOS cocoa 环境完成 Light/Dark、1180×760 和 720×520 截图验收；短窗口设置入口保持底部且无截断、溢出。
+- 22 项 V2 UI/主题测试通过；全量 65 项测试通过 64 项，1 项显式启用的本地 Ollama 实时测试跳过；`compileall` 与 Qt Resource 再生成一致性检查通过。
+- Windows、Linux 原生字体、图标栅格化和焦点绘制尚未验证。
 
 ### 修改范围
 

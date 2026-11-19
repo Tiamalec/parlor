@@ -1,0 +1,9 @@
+<RCC>
+  <qresource prefix="/icons">
+    <file alias="message-circle.svg">lucide/message-circle.svg</file>
+    <file alias="users.svg">lucide/users.svg</file>
+    <file alias="bot.svg">lucide/bot.svg</file>
+    <file alias="shield.svg">lucide/shield.svg</file>
+    <file alias="settings-2.svg">lucide/settings-2.svg</file>
+  </qresource>
+</RCC>

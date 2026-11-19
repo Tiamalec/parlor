@@ -237,3 +237,28 @@ class V2ThemeTests(unittest.TestCase):
         self.assertEqual(chat.compose.toPlainText(), "尚未发送的内容")
         self.assertEqual(scroll_bar.value(), scroll_position)
         self.assertEqual({key: id(value) for key, value in chat._message_rows.items()}, message_widget_ids)
+
+    def test_navigation_selection_and_icons_survive_theme_switch(self) -> None:
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import Workspace
+        from client.v2.theme import ThemeMode
+
+        manager = self._install()
+        store = AppStore()
+        workspace = Workspace(
+            ChatService(NetworkClient("127.0.0.1", 9), store),
+            store,
+            "127.0.0.1",
+            9,
+        )
+        workspace.nav_buttons[2].click()
+        light_icon_key = workspace.nav_buttons[2].icon().cacheKey()
+
+        manager.set_mode(ThemeMode.DARK)
+        self.app.processEvents()
+
+        self.assertEqual(workspace.pages.currentIndex(), 2)
+        self.assertTrue(workspace.nav_buttons[2].isChecked())
+        self.assertNotEqual(workspace.nav_buttons[2].icon().cacheKey(), light_icon_key)
