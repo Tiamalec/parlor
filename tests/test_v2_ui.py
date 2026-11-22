@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import os
+import base64
 import unittest
+from unittest.mock import Mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 try:
-    from PySide6.QtCore import QEvent, QSize, Qt
+    from PySide6.QtCore import QEvent, QPoint, QSize, Qt
     from PySide6.QtGui import QColor, QImage, QPalette
-    from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QScrollArea, QToolButton, QWidget
+    from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QScrollArea, QToolButton, QWidget
 except ImportError:  # pragma: no cover - optional until V2 dependencies are installed
     QApplication = None  # type: ignore[assignment]
 
@@ -29,20 +31,801 @@ class V2UiTests(unittest.TestCase):
         self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         self.app.processEvents()
 
+    def test_chat_quote_marker_and_search_navigation(self) -> None:
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import ChatPane
+        from client.v2.widgets import MessageBubble
+
+        store = AppStore()
+        store.state.current_user = {"id": 1, "role": "user"}
+        key = ConversationKey("group", "7")
+        store.state.members_by_group["7"] = [{"id": 2, "member_id": "user:2", "kind": "user", "username": "bob"}]
+        store.state.messages[key] = [
+            {"id": 1, "conversation_type": "group", "conversation_id": "7", "sender_id": 2,
+             "sender_name": "bob", "message_type": "text", "content": "original"},
+            {"id": 2, "conversation_type": "group", "conversation_id": "7", "sender_id": 1,
+             "sender_name": "alice", "message_type": "text", "content": "answer",
+             "reply_to_id": 1, "reply_preview": "bob: original", "edited": True},
+        ]
+        pane = ChatPane(ChatService(NetworkClient("127.0.0.1", 9), store), store)
+        pane.set_conversation(key, "群聊")
+        pane.show()
+        self.app.processEvents()
+        bubbles = pane.findChildren(MessageBubble)
+        self.assertEqual(len(bubbles), 2)
+        self.assertTrue(any("已编辑" in label.text() for label in pane.findChildren(QLabel, "MessageTime")))
+        self.assertIsNone(bubbles[1].findChild(QLabel, "MessageTime"))
+        self.assertIsNone(bubbles[0].findChild(QLabel, "MessageSender"))
+        quote = next(button for button in bubbles[1].findChildren(QPushButton) if button.accessibleName() == "定位引用消息")
+        self.assertEqual(quote.text(), "bob: original")
+        self.assertEqual([action.text() for action in bubbles[0]._create_menu().actions()], ["引用回复"])
+        self.assertEqual(bubbles[0].content_label.contextMenuPolicy(), Qt.ContextMenuPolicy.CustomContextMenu)
+        quote.click()
+        self.app.processEvents()
+        self.assertEqual(pane._focus_message_id, None)
+        pane._reply_to(1)
+        self.assertEqual(pane._reply_to_id, 1)
+        self.assertEqual(pane.compose.mentions()[0]["member_id"], "user:2")
+        store.state.search_results[key] = [store.state.messages[key][0]]
+        pane.update_state("search", store.state)
+        pane._open_search_result(pane.search_results.item(0))
+        self.app.processEvents()
+        self.assertIsNone(pane._focus_message_id)
+        pane.service.load_result = Mock(return_value="history-request")
+        pane._focus_quoted_message(44)
+        pane.service.load_result.assert_called_once_with(key, 44)
+        self.assertEqual(pane._focus_message_id, 44)
+        store.handle_event({"type": "history.result", "payload": {"conversation_type": "group",
+                            "conversation_id": "7", "messages": [{"id": 44, "conversation_type": "group",
+                            "conversation_id": "7", "sender_id": 2, "sender_name": "bob",
+                            "message_type": "text", "content": "older"}]}})
+        pane.update_state("history", store.state)
+        self.app.processEvents()
+        self.assertIsNone(pane._focus_message_id)
+
+    def test_group_message_metadata_is_outside_bubble_and_consecutive_sender_is_grouped(self) -> None:
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import ChatPane
+        from client.v2.widgets import MessageBubble
+
+        store = AppStore()
+        store.state.current_user = {"id": 1, "role": "user"}
+        key = ConversationKey("group", "7")
+        store.state.members_by_group["7"] = [
+            {"id": 2, "member_id": "user:2", "kind": "user", "username": "bob"},
+            {"id": 3, "member_id": "user:3", "kind": "user", "username": "carol"},
+        ]
+        store.state.messages[key] = [
+            {"id": 1, "sender_id": 2, "sender_name": "bob", "message_type": "text",
+             "content": "第一条", "created_at": 1000},
+            {"id": 2, "sender_id": 2, "sender_name": "bob", "message_type": "text",
+             "content": "连续一条", "created_at": 1040},
+            {"id": 3, "sender_id": 3, "sender_name": "carol", "message_type": "text",
+             "content": "换人", "created_at": 1050},
+        ]
+
+        pane = ChatPane(ChatService(NetworkClient("127.0.0.1", 9), store), store)
+        pane.set_conversation(key, "群聊")
+        pane.show()
+        self.app.processEvents()
+
+        bubbles = pane.findChildren(MessageBubble)
+        self.assertEqual(len(bubbles), 3)
+        self.assertTrue(all(bubble.findChild(QLabel, "MessageSender") is None for bubble in bubbles))
+        sender_labels = pane.findChildren(QLabel, "MessageSender")
+        self.assertEqual([label.text() for label in sender_labels], ["bob", "carol"])
+        rows = pane.findChildren(QWidget, "MessageRow")
+        self.assertEqual([bool(row.property("grouped")) for row in rows], [False, True, False])
+        self.assertEqual(len(rows[0].findChildren(QLabel, "MessageTime")), 1)
+        self.assertEqual(len(rows[1].findChildren(QLabel, "MessageTime")), 1)
+
+    def test_sticker_uses_standalone_renderer_not_text_bubble(self) -> None:
+        from client.v2.widgets import MessageBubble
+
+        sticker = MessageBubble(
+            {
+                "id": 4,
+                "message_type": "sticker",
+                "sticker_name": "开心",
+                "image_mime": "image/png",
+                "image_data": base64.b64encode(
+                    base64.b64decode(
+                        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                    )
+                ).decode("ascii"),
+            },
+            mine=False,
+        )
+        self.assertEqual(sticker.property("messageType"), "sticker")
+        self.assertIsNotNone(sticker.findChild(QLabel, "MessageSticker"))
+        self.assertIsNone(sticker.findChild(QLabel, "PlainMessageContent"))
+        self.assertEqual(sticker.layout().contentsMargins().left(), 0)
+
+    def test_media_click_opens_preview_or_requests_missing_data(self) -> None:
+        from PySide6.QtTest import QTest
+
+        from client.v2.widgets import MessageBubble
+
+        encoded = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        for message_type, object_name in (("image", "MessageImage"), ("sticker", "MessageSticker")):
+            bubble = MessageBubble(
+                {
+                    "id": 10,
+                    "message_type": message_type,
+                    "image_mime": "image/png",
+                    "image_data": encoded,
+                },
+                mine=False,
+            )
+            bubble._preview_media = Mock()
+            bubble.show()
+            self.app.processEvents()
+            QTest.mouseClick(
+                bubble.findChild(QLabel, object_name), Qt.MouseButton.LeftButton
+            )
+            bubble._preview_media.assert_called_once()
+
+        preview = bubble._create_media_preview(base64.b64decode(encoded))
+        close_preview = next(
+            button
+            for button in preview.findChildren(QPushButton)
+            if button.accessibleName() == "关闭媒体预览"
+        )
+        preview.show()
+        self.app.processEvents()
+        close_preview.click()
+        self.assertFalse(preview.isVisible())
+
+        missing = MessageBubble(
+            {"id": 11, "message_type": "image", "image_name": "missing.png"},
+            mine=False,
+        )
+        requested: list[int] = []
+        missing.media_requested.connect(requested.append)
+        missing.show()
+        self.app.processEvents()
+        QTest.mouseClick(
+            missing.findChild(QLabel, "MessageImage"), Qt.MouseButton.LeftButton
+        )
+        self.assertEqual(requested, [11])
+
+    def test_sticker_panel_exposes_recent_favorites_imported_and_send(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        from client.v2.stickers import LocalStickerLibrary, StickerPanel
+
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "happy.png"
+            source.write_bytes(
+                base64.b64decode(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                )
+            )
+            library = LocalStickerLibrary(Path(temp) / "library")
+            sticker = library.import_file(source)
+            library.set_favorite(sticker["id"], True)
+            library.mark_used(sticker["id"])
+            panel = StickerPanel(library)
+
+            self.assertEqual(
+                [panel.tabs.tabText(index) for index in range(panel.tabs.count())],
+                ["最近使用", "收藏/默认", "我的表情"],
+            )
+            self.assertEqual(panel.lists["recent"].count(), 1)
+            self.assertEqual(panel.lists["favorites"].count(), 1)
+            self.assertEqual(panel.lists["mine"].count(), 1)
+            self.assertEqual(panel.close_button.text(), "关闭")
+            panel.show()
+            self.app.processEvents()
+            panel.close_button.click()
+            self.assertFalse(panel.isVisible())
+            selected: list[dict] = []
+            panel.sticker_selected.connect(selected.append)
+            panel._emit_sticker(sticker)
+            self.assertEqual(selected[0]["id"], sticker["id"])
+
+    def test_chat_pane_sends_imported_sticker_and_records_recent_use(self) -> None:
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        from PySide6.QtTest import QTest
+
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import ChatPane
+        from client.v2.stickers import LocalStickerLibrary
+
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "happy.png"
+            source.write_bytes(
+                base64.b64decode(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                )
+            )
+            library = LocalStickerLibrary(Path(temp) / "library")
+            sticker = library.import_file(source)
+            store = AppStore()
+            store.state.current_user = {"id": 1}
+            service = ChatService(NetworkClient("127.0.0.1", 9), store)
+            service.send_sticker = Mock(return_value="sticker-request")
+            pane = ChatPane(service, store)
+            pane.key = ConversationKey("group", "7")
+            pane._sticker_library = library
+            pane._reply_to_id = 12
+
+            pane.show()
+            self.app.processEvents()
+            QTest.mouseClick(pane.sticker, Qt.MouseButton.LeftButton)
+            self.app.processEvents()
+            self.assertIsNotNone(pane._sticker_panel)
+            self.assertTrue(pane._sticker_panel.isVisible())
+            pane._sticker_panel.close_button.click()
+            with patch(
+                "client.v2.application.QFileDialog.getOpenFileName",
+                return_value=("", ""),
+            ) as chooser:
+                QTest.mouseClick(pane.image, Qt.MouseButton.LeftButton)
+                chooser.assert_called_once()
+
+            pane._send_sticker(sticker)
+
+            service.send_sticker.assert_called_once()
+            args = service.send_sticker.call_args.args
+            self.assertEqual(args[0], pane.key)
+            self.assertEqual(args[1:3], (sticker["id"], "happy"))
+            self.assertEqual(args[-1], 12)
+            self.assertEqual(library.list("recent")[0]["id"], sticker["id"])
+            self.assertIsNone(pane._reply_to_id)
+
+    def test_historical_image_loads_after_reopening_chat(self) -> None:
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import ChatPane
+        from client.v2.widgets import MessageBubble
+
+        store = AppStore()
+        store.state.connected = True
+        store.state.authenticated = True
+        store.state.current_user = {"id": 1}
+        key = ConversationKey("group", "7")
+        store.state.messages[key] = [{"id": 8, "conversation_type": "group", "conversation_id": "7",
+                                     "sender_id": 2, "sender_name": "bob", "message_type": "image",
+                                     "image_name": "photo.png", "event_id": 10}]
+        service = ChatService(NetworkClient("127.0.0.1", 9), store)
+        service.fetch_media = Mock(return_value="media-request")
+        pane = ChatPane(service, store)
+        pane.set_conversation(key, "群聊")
+        pane.show()
+        self.app.processEvents()
+        service.fetch_media.assert_called_once_with(8)
+        from PySide6.QtCore import QBuffer, QIODevice
+
+        pixels = QImage(2, 2, QImage.Format.Format_ARGB32)
+        pixels.fill(Qt.GlobalColor.blue)
+        buffer = QBuffer()
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        self.assertTrue(pixels.save(buffer, "PNG"))
+        image_data = base64.b64encode(bytes(buffer.data())).decode("ascii")
+        store.handle_event({"type": "media.result", "payload": {"message": {"id": 8,
+                            "conversation_type": "group", "conversation_id": "7", "image_data": image_data}}})
+        pane.update_state("media", store.state)
+        image = pane.findChild(MessageBubble).findChild(QLabel, "MessageImage")
+        self.assertIsNotNone(image.pixmap())
+        self.assertFalse(image.pixmap().isNull())
+
+    def test_chat_follows_new_messages_and_badges_history_reading(self) -> None:
+        from PySide6.QtTest import QTest
+
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import ChatPane
+
+        store = AppStore()
+        store.state.current_user = {"id": 1, "role": "user"}
+        key = ConversationKey("group", "7")
+        store.state.messages[key] = [
+            {"id": message_id, "conversation_type": "group", "conversation_id": "7",
+             "sender_id": 2, "sender_name": "bob", "message_type": "text",
+             "content": f"message {message_id}"}
+            for message_id in range(1, 31)
+        ]
+        pane = ChatPane(ChatService(NetworkClient("127.0.0.1", 9), store), store)
+        pane.resize(640, 360)
+        pane.show()
+        self.app.processEvents()
+        pane.set_conversation(key, "群聊")
+        self.app.processEvents()
+        QTest.qWait(10)
+        self.app.processEvents()
+
+        bar = pane.scroll.verticalScrollBar()
+        self.assertGreater(bar.maximum(), 0)
+        self.assertEqual(bar.value(), bar.maximum())
+
+        def add_message(message_id: int, sender_id: int = 2) -> None:
+            store.state.messages[key].append(
+                {"id": message_id, "conversation_type": "group", "conversation_id": "7",
+                 "sender_id": sender_id, "sender_name": "bob" if sender_id == 2 else "alice",
+                 "message_type": "text", "content": f"message {message_id}"}
+            )
+            pane.update_state("messages", store.state)
+            self.app.processEvents()
+            QTest.qWait(10)
+            self.app.processEvents()
+
+        bar.setValue(0)
+        self.app.processEvents()
+        add_message(31)
+        self.assertTrue(pane.new_messages_badge.isVisible())
+        self.assertEqual(pane.new_messages_badge.text(), "1 条新消息")
+        self.assertFalse(pane.new_messages_badge.icon().isNull())
+        self.assertGreater(pane.new_messages_badge.x(), pane.scroll.width() // 2)
+        self.assertGreaterEqual(
+            pane.new_messages_badge.y() + pane.new_messages_badge.height(),
+            pane.scroll.height() - 20,
+        )
+        self.assertEqual(bar.value(), 0)
+
+        add_message(32)
+        self.assertEqual(pane.new_messages_badge.text(), "2 条新消息")
+        self.assertEqual(bar.value(), 0)
+
+        pane.new_messages_badge.click()
+        self.app.processEvents()
+        QTest.qWait(300)
+        self.app.processEvents()
+        self.assertFalse(pane.new_messages_badge.isVisible())
+        self.assertEqual(bar.value(), bar.maximum())
+
+        add_message(33)
+        self.assertFalse(pane.new_messages_badge.isVisible())
+        self.assertEqual(bar.value(), bar.maximum())
+
+        bar.setValue(0)
+        self.app.processEvents()
+        pane.compose.setPlainText("hello")
+        pane.service.send_text = Mock(return_value="send-request")
+        pane._send()
+        self.app.processEvents()
+        QTest.qWait(10)
+        self.app.processEvents()
+        self.assertEqual(bar.value(), bar.maximum())
+        self.assertFalse(pane.new_messages_badge.isVisible())
+
+        add_message(34, sender_id=1)
+        self.assertFalse(pane.new_messages_badge.isVisible())
+        self.assertEqual(bar.value(), bar.maximum())
+
+        bar.setValue(0)
+        self.app.processEvents()
+        add_message(35)
+        self.assertTrue(pane.new_messages_badge.isVisible())
+        bar.setValue(bar.maximum())
+        self.app.processEvents()
+        self.assertFalse(pane.new_messages_badge.isVisible())
+        self.assertEqual(pane._pending_new_messages, 0)
+
+        for message_id in range(36, 41):
+            add_message(message_id)
+        self.assertFalse(pane.new_messages_badge.isVisible())
+        self.assertEqual(bar.value(), bar.maximum())
+
+    def test_new_message_badge_ignores_layout_and_duplicate_events(self) -> None:
+        from PySide6.QtTest import QTest
+
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import ChatPane
+
+        store = AppStore()
+        store.state.current_user = {"id": 1, "role": "user"}
+        key = ConversationKey("group", "7")
+        store.state.messages[key] = [
+            {"id": message_id, "conversation_type": "group", "conversation_id": "7",
+             "sender_id": 2, "sender_name": "bob", "message_type": "text",
+             "content": f"message {message_id}"}
+            for message_id in range(1, 31)
+        ]
+        pane = ChatPane(ChatService(NetworkClient("127.0.0.1", 9), store), store)
+        pane.resize(640, 360)
+        pane.show()
+        self.app.processEvents()
+        pane.set_conversation(key, "群聊")
+        self.app.processEvents()
+        QTest.qWait(40)
+        self.app.processEvents()
+        bar = pane.scroll.verticalScrollBar()
+        bar.setValue(0)
+        self.app.processEvents()
+
+        def render(topic: str = "messages") -> None:
+            pane.update_state(topic, store.state)
+            self.app.processEvents()
+            QTest.qWait(20)
+            self.app.processEvents()
+
+        store.state.messages[key].append(
+            {"id": 31, "conversation_type": "group", "conversation_id": "7",
+             "sender_id": 2, "sender_name": "bob", "message_type": "text", "content": "new"}
+        )
+        render()
+        self.assertEqual(pane._pending_new_messages, 1)
+        self.assertEqual(pane.new_messages_badge.text(), "1 条新消息")
+
+        render()
+        self.assertEqual(pane._pending_new_messages, 1)
+        store.state.messages[key][-1]["content"] = "edited"
+        render()
+        self.assertEqual(pane._pending_new_messages, 1)
+        store.state.messages[key][-1]["recalled"] = True
+        store.state.messages[key][-1]["content"] = ""
+        render()
+        self.assertEqual(pane._pending_new_messages, 1)
+
+        store.state.messages[key].append(
+            {"id": 32, "conversation_type": "group", "conversation_id": "7",
+             "sender_id": 2, "sender_name": "bob", "message_type": "image", "image_name": "p.png"}
+        )
+        render()
+        self.assertEqual(pane._pending_new_messages, 2)
+        store.state.messages[key][-1]["image_data"] = (
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        )
+        render("media")
+        self.assertEqual(pane._pending_new_messages, 2)
+
+        store.state.messages[key].append(
+            {"id": 33, "conversation_type": "group", "conversation_id": "7",
+             "sender_id": "agent_taffy", "sender_agent_id": "agent_taffy", "sender_kind": "agent",
+             "sender_name": "永雏塔菲", "message_type": "agent", "content_format": "markdown", "content": "a"}
+        )
+        render("agent_result")
+        self.assertEqual(pane._pending_new_messages, 3)
+        for chunk in ("ab", "abc", "abcd"):
+            store.state.messages[key][-1]["content"] = chunk
+            render("agent_result")
+        self.assertEqual(pane._pending_new_messages, 3)
+
+        store.state.messages[key].insert(
+            0,
+            {"id": 5, "conversation_type": "group", "conversation_id": "7",
+             "sender_id": 2, "sender_name": "bob", "message_type": "text", "content": "older"},
+        )
+        render("history")
+        self.assertEqual(pane._pending_new_messages, 3)
+        self.assertEqual(pane.new_messages_badge.text(), "3 条新消息")
+
+        store.state.messages[key].append(
+            {"id": 40, "conversation_type": "group", "conversation_id": "7",
+             "sender_id": 2, "sender_name": "bob", "message_type": "text", "content": "after reconnect"}
+        )
+        render("auth")
+        self.assertEqual(pane._pending_new_messages, 4)
+        render("auth")
+        self.assertEqual(pane._pending_new_messages, 4)
+
+    def test_five_new_messages_while_reading_history(self) -> None:
+        from PySide6.QtTest import QTest
+
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import ChatPane
+
+        store = AppStore()
+        store.state.current_user = {"id": 1, "role": "user"}
+        key = ConversationKey("group", "7")
+        store.state.messages[key] = [
+            {"id": message_id, "conversation_type": "group", "conversation_id": "7",
+             "sender_id": 2, "sender_name": "bob", "message_type": "text",
+             "content": f"message {message_id}"}
+            for message_id in range(1, 31)
+        ]
+        pane = ChatPane(ChatService(NetworkClient("127.0.0.1", 9), store), store)
+        pane.resize(640, 360)
+        pane.show()
+        self.app.processEvents()
+        pane.set_conversation(key, "群聊")
+        self.app.processEvents()
+        QTest.qWait(40)
+        self.app.processEvents()
+        bar = pane.scroll.verticalScrollBar()
+        bar.setValue(0)
+        self.app.processEvents()
+
+        for message_id in range(31, 36):
+            store.state.messages[key].append(
+                {"id": message_id, "conversation_type": "group", "conversation_id": "7",
+                 "sender_id": 2, "sender_name": "bob", "message_type": "text",
+                 "content": f"new {message_id}"}
+            )
+        pane.update_state("messages", store.state)
+        self.app.processEvents()
+        QTest.qWait(40)
+        self.app.processEvents()
+
+        self.assertTrue(pane.new_messages_badge.isVisible())
+        self.assertEqual(pane.new_messages_badge.text(), "5 条新消息")
+        self.assertEqual(bar.value(), 0)
+
+        pane.new_messages_badge.click()
+        self.app.processEvents()
+        QTest.qWait(300)
+        self.app.processEvents()
+        self.assertFalse(pane.new_messages_badge.isVisible())
+        self.assertEqual(bar.value(), bar.maximum())
+
+    def test_send_failure_keeps_input_and_reports_error(self) -> None:
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import ChatPane
+
+        store = AppStore()
+        store.state.current_user = {"id": 1, "role": "user"}
+        key = ConversationKey("group", "7")
+        service = ChatService(NetworkClient("127.0.0.1", 9), store)
+        service.send_text = Mock(return_value=None)
+        pane = ChatPane(service, store)
+        pane.set_conversation(key, "群聊")
+        pane.show()
+        self.app.processEvents()
+
+        pane.compose.setPlainText("hello")
+        store.state.last_error = "未连接到聊天服务器"
+        pane._send()
+        self.assertEqual(pane.compose.toPlainText(), "hello")
+        self.assertIn("发送失败", pane.subtitle.text())
+        pane._send_feedback_timer.stop()
+
+    def test_history_load_preserves_visible_message_position(self) -> None:
+        from PySide6.QtTest import QTest
+
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import ChatPane
+
+        store = AppStore()
+        store.state.current_user = {"id": 1, "role": "user"}
+        key = ConversationKey("group", "7")
+        store.state.messages[key] = [
+            {"id": message_id, "conversation_type": "group", "conversation_id": "7",
+             "sender_id": 2, "sender_name": "bob", "message_type": "text",
+             "content": f"message {message_id}"}
+            for message_id in range(100, 130)
+        ]
+        pane = ChatPane(ChatService(NetworkClient("127.0.0.1", 9), store), store)
+        pane.resize(640, 360)
+        pane.show()
+        self.app.processEvents()
+        pane.set_conversation(key, "群聊")
+        self.app.processEvents()
+        QTest.qWait(40)
+        self.app.processEvents()
+        bar = pane.scroll.verticalScrollBar()
+        bar.setValue(500)
+        self.app.processEvents()
+
+        viewport = pane.scroll.viewport()
+        rows = [
+            (row.mapTo(viewport, QPoint(0, 0)).y(), message_id)
+            for message_id, row in pane._message_rows.items()
+        ]
+        positive = [item for item in rows if item[0] >= 0]
+        before_y, anchor_id = min(positive) if positive else min(rows, key=lambda item: abs(item[0]))
+
+        for message_id in range(50, 70):
+            store.state.messages[key].append(
+                {"id": message_id, "conversation_type": "group", "conversation_id": "7",
+                 "sender_id": 2, "sender_name": "bob", "message_type": "text",
+                 "content": f"older {message_id}"}
+            )
+        store.state.messages[key].sort(key=lambda item: int(item["id"]))
+        pane.update_state("history", store.state)
+        self.app.processEvents()
+        QTest.qWait(50)
+        self.app.processEvents()
+
+        after_y = pane._message_rows[anchor_id].mapTo(viewport, QPoint(0, 0)).y()
+        self.assertLessEqual(abs(after_y - before_y), 2)
+        self.assertEqual(pane._pending_new_messages, 0)
+        self.assertFalse(pane.new_messages_badge.isVisible())
+
+    def test_conversation_switch_keeps_independent_new_message_state(self) -> None:
+        from PySide6.QtTest import QTest
+
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import ChatPane
+
+        store = AppStore()
+        store.state.current_user = {"id": 1, "role": "user"}
+        first = ConversationKey("group", "7")
+        second = ConversationKey("group", "8")
+        store.state.messages[first] = [
+            {"id": message_id, "conversation_type": "group", "conversation_id": "7",
+             "sender_id": 2, "sender_name": "bob", "message_type": "text",
+             "content": f"first {message_id}"}
+            for message_id in range(1, 31)
+        ]
+        store.state.messages[second] = [
+            {"id": message_id, "conversation_type": "group", "conversation_id": "8",
+             "sender_id": 3, "sender_name": "carol", "message_type": "text",
+             "content": f"second {message_id}"}
+            for message_id in range(1, 10)
+        ]
+        pane = ChatPane(ChatService(NetworkClient("127.0.0.1", 9), store), store)
+        pane.resize(640, 360)
+        pane.show()
+        self.app.processEvents()
+        pane.set_conversation(first, "群聊 A")
+        self.app.processEvents()
+        QTest.qWait(40)
+        self.app.processEvents()
+        bar = pane.scroll.verticalScrollBar()
+        bar.setValue(300)
+        self.app.processEvents()
+
+        store.state.messages[first].append(
+            {"id": 31, "conversation_type": "group", "conversation_id": "7",
+             "sender_id": 2, "sender_name": "bob", "message_type": "text", "content": "new"}
+        )
+        pane.update_state("messages", store.state)
+        self.app.processEvents()
+        QTest.qWait(30)
+        self.app.processEvents()
+        self.assertEqual(pane._pending_new_messages, 1)
+        self.assertTrue(pane.new_messages_badge.isVisible())
+
+        pane.set_conversation(second, "群聊 B")
+        self.app.processEvents()
+        QTest.qWait(40)
+        self.app.processEvents()
+        self.assertEqual(pane._pending_new_messages, 0)
+        self.assertFalse(pane.new_messages_badge.isVisible())
+        self.assertEqual(bar.value(), bar.maximum())
+
+        store.state.messages[first].append(
+            {"id": 32, "conversation_type": "group", "conversation_id": "7",
+             "sender_id": 2, "sender_name": "bob", "message_type": "text", "content": "new 2"}
+        )
+        pane.set_conversation(first, "群聊 A")
+        self.app.processEvents()
+        QTest.qWait(60)
+        self.app.processEvents()
+        self.assertEqual(pane._pending_new_messages, 2)
+        self.assertTrue(pane.new_messages_badge.isVisible())
+        self.assertEqual(pane.new_messages_badge.text(), "2 条新消息")
+        self.assertLess(bar.value(), bar.maximum())
+
+        pane.set_conversation(second, "群聊 B")
+        self.app.processEvents()
+        QTest.qWait(40)
+        self.app.processEvents()
+        self.assertEqual(pane._pending_new_messages, 0)
+        self.assertFalse(pane.new_messages_badge.isVisible())
+
+    def test_ai_menu_lists_group_agents_and_inserts_selected_mention(self) -> None:
+        from PySide6.QtCore import QBuffer, QIODevice
+
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import ChatPane
+
+        store = AppStore()
+        store.state.current_user = {"id": 1, "role": "user"}
+        key = ConversationKey("group", "7")
+        store.state.group_agents["7"] = [
+            {"id": "agent", "member_id": "agent:agent", "name": "AI Agent",
+             "username": "AI Agent", "display_name": "AI Agent", "kind": "agent", "enabled": True},
+            {"id": "agent_taffy", "member_id": "agent:agent_taffy", "name": "永雏塔菲",
+             "username": "永雏塔菲", "display_name": "永雏塔菲", "kind": "agent",
+             "enabled": True, "builtin": True, "avatar_version": 1, "avatar_mime": "image/png"},
+            {"id": "agent_off", "member_id": "agent:agent_off", "name": "离线 Agent",
+             "username": "离线 Agent", "display_name": "离线 Agent", "kind": "agent", "enabled": False},
+        ]
+        avatar = QImage(2, 2, QImage.Format.Format_ARGB32)
+        avatar.fill(QColor("#ff2d55"))
+        buffer = QBuffer()
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        self.assertTrue(avatar.save(buffer, "PNG"))
+        store.state.agent_avatar_cache["agent_taffy"] = {
+            "agent_id": "agent_taffy",
+            "avatar_version": 1,
+            "avatar_mime": "image/png",
+            "image_data": base64.b64encode(bytes(buffer.data())).decode("ascii"),
+        }
+        pane = ChatPane(ChatService(NetworkClient("127.0.0.1", 9), store), store)
+        pane.set_conversation(key, "群聊")
+        pane.show()
+        self.app.processEvents()
+
+        pane._populate_ai_menu()
+        labels = [action.text() for action in pane.ai_menu.actions()]
+        self.assertIn("总结最近消息", labels)
+        self.assertIn("提取待办", labels)
+        self.assertIn("向 AI Agent 提问", labels)
+        self.assertIn("向 永雏塔菲 提问 · 预设", labels)
+        self.assertNotIn("向 离线 Agent 提问", labels)
+
+        target = next(action for action in pane.ai_menu.actions() if action.text() == "向 永雏塔菲 提问 · 预设")
+        self.assertFalse(target.icon().isNull())
+        color = target.icon().pixmap(22, 22).toImage().pixelColor(11, 11)
+        self.assertGreater(color.red(), 200)
+        self.assertLess(color.green(), 100)
+        target.trigger()
+        self.app.processEvents()
+        self.assertEqual(pane.compose.toPlainText(), "@永雏塔菲 ")
+        mentions = pane.compose.mentions()
+        self.assertEqual(len(mentions), 1)
+        self.assertEqual(mentions[0]["member_id"], "agent:agent_taffy")
+        self.assertEqual(mentions[0]["kind"], "agent")
+
+        store.state.group_agents.pop("7")
+        store.state.members_by_group["7"] = [
+            {"id": "agent", "member_id": "agent:agent", "username": "AI Agent", "kind": "agent"},
+            {"id": 2, "member_id": "user:2", "username": "bob", "kind": "user"},
+        ]
+        pane._populate_ai_menu()
+        labels = [action.text() for action in pane.ai_menu.actions()]
+        self.assertIn("向 AI Agent 提问", labels)
+
+        pane.set_conversation(ConversationKey("private", "2"), "bob")
+        pane._populate_ai_menu()
+        empty = pane.ai_menu.actions()[-1]
+        self.assertEqual(empty.text(), "当前会话暂无可用 Agent")
+        self.assertFalse(empty.isEnabled())
+
     def test_auth_page_and_conversation_card_layout(self) -> None:
         from client.v2.application import AuthPage
         from client.v2.widgets import ConversationCard
 
         auth = AuthPage("127.0.0.1", 8765)
+        auth.resize(1180, 760)
+        auth.show()
+        self.app.processEvents()
+        self.assertTrue(auth.hero.isVisible())
+        self.assertFalse(auth.brand_tile.pixmap().isNull())
         self.assertEqual(auth.submit.text(), "登录")
+        self.assertEqual(auth.heading.text(), "欢迎回来")
+        self.assertEqual(auth.password.echoMode(), QLineEdit.EchoMode.Password)
+        auth.reveal_action.trigger()
+        self.assertEqual(auth.password.echoMode(), QLineEdit.EchoMode.Normal)
+        auth.reveal_action.trigger()
+        self.assertEqual(auth.password.echoMode(), QLineEdit.EchoMode.Password)
         auth.register_mode.click()
         self.assertEqual(auth.submit.text(), "创建账号")
+        self.assertEqual(auth.heading.text(), "创建账号")
+        auth.resize(760, 600)
+        self.app.processEvents()
+        self.assertFalse(auth.hero.isVisible())
+        auth.close()
         card = ConversationCard(
             ConversationSummary(ConversationKey("group", "1"), "项目组", "最后消息", 1, 3)
         )
+        card.resize(320, 64)
+        card.show()
+        self.app.processEvents()
+        self.assertEqual(card._title.text(), "项目组")
+        self.assertGreater(card._title.width(), 0)
+        self.assertTrue(card._avatar._group)
         self.assertEqual(card.height(), 64)
         card.set_selected(True)
         self.assertTrue(card.property("selected"))
+        card.close()
 
     def test_workspace_responsive_minimum(self) -> None:
         from client.network import NetworkClient
@@ -412,6 +1195,65 @@ class V2UiTests(unittest.TestCase):
         self.assertEqual(profile.group_role, "owner")
         self.assertEqual(profile.available_actions, ("mute",))
 
+    def test_profile_popover_scrolls_long_bio_and_avatar_menu_mentions(self) -> None:
+        from client.network import NetworkClient
+        from client.profile import ProfileViewModel
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import ChatPane
+        from client.v2.profile_widgets import ProfilePopover
+        from client.v2.widgets import UserAvatar
+
+        store = AppStore()
+        store.state.current_user = {"id": 1, "username": "alice"}
+        store.state.members_by_group["7"] = [
+            {"id": 2, "member_id": "user:2", "kind": "user", "username": "bob", "display_name": "小博"}
+        ]
+        key = ConversationKey("group", "7")
+        store.state.messages[key] = [
+            {
+                "id": 1,
+                "conversation_type": "group",
+                "conversation_id": "7",
+                "sender_id": 2,
+                "sender_name": "小博",
+                "message_type": "text",
+                "content": "你好",
+            }
+        ]
+        service = ChatService(NetworkClient("127.0.0.1", 9), store)
+        profile = ProfileViewModel(
+            user_id=None,
+            display_name="千冥爱音",
+            agent_id="a1",
+            kind="agent",
+            online=True,
+            agent_model="chatroom-qwen3.5-4b",
+            agent_description="开朗、社交力强、爱赶流行，也有点爱面子；关键时刻会努力把大家拉到一起，不轻易放弃。" * 12,
+            agent_personality="开朗、爱赶流行、重视伙伴的乐队风格角色。" * 10,
+        )
+        anchor = QWidget()
+        anchor.resize(36, 36)
+        anchor.show()
+        popover = ProfilePopover(service)
+        popover.show_for(anchor, profile, pinned=True)
+        self.app.processEvents()
+        self.assertLessEqual(popover.height(), 560)
+        self.assertGreater(popover.scroll.verticalScrollBar().maximum(), 0)
+        popover.hide()
+
+        pane = ChatPane(service, store)
+        pane.resize(900, 600)
+        pane.set_conversation(key, "项目组")
+        pane.show()
+        self.app.processEvents()
+        avatar = pane.findChildren(UserAvatar)[0]
+        menu = pane._avatar_menu(avatar.profile, avatar)
+        self.assertIn("提及", [action.text() for action in menu.actions()])
+        pane._insert_profile_mention(avatar.profile)
+        self.assertEqual(pane.compose.mentions()[0]["member_id"], "user:2")
+        pane.close()
+
     def test_contacts_use_selection_details_and_semantic_group_actions(self) -> None:
         from client.network import NetworkClient
         from client.service import ChatService
@@ -522,12 +1364,43 @@ class V2UiTests(unittest.TestCase):
         self.assertEqual(page.filter_summary.text(), "1 个任务")
         failed_card = page.task_rows.itemAt(0).widget()
         self.assertIsInstance(failed_card, AgentTaskCard)
-        self.assertTrue(any("模型暂时不可用" in label.text() for label in failed_card.findChildren(QLabel)))
+        self.assertTrue(any("AI 服务暂时不可用" in label.text() for label in failed_card.findChildren(QLabel)))
 
         store.state.pending["request"] = "agent.activity.list"
         page.update_state("pending", store.state)
         self.assertFalse(page.notice.isHidden())
         self.assertIn("正在更新", page.notice.text())
+
+    def test_ai_task_center_keeps_personal_structured_tasks_only(self) -> None:
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import AICenterPage
+
+        store = AppStore()
+        key = ConversationKey("group", "7")
+        store.state.current_user = {"id": 1, "username": "alice"}
+        store.state.conversations = [ConversationSummary(key, "项目组")]
+        store.state.activities = [
+            {"id": 1, "task_type": "question", "conversation_type": "group", "conversation_id": "7",
+             "requested_by": 1, "requested_by_name": "alice", "status": "succeeded", "started_at": 1},
+            {"id": 2, "task_type": "summary", "conversation_type": "group", "conversation_id": "7",
+             "requested_by": 1, "requested_by_name": "alice", "status": "succeeded", "started_at": 2},
+            {"id": 3, "task_type": "todo", "conversation_type": "group", "conversation_id": "7",
+             "requested_by": 2, "requested_by_name": "bob", "status": "failed", "started_at": 3},
+        ]
+        page = AICenterPage(ChatService(NetworkClient("127.0.0.1", 9), store), store)
+        page.update_state("conversations", store.state)
+        self.assertEqual(page.filter_summary.text(), "1 个任务")
+        self.assertLess(page.type_filter.findData("question"), 0)
+
+    def test_test_notification_uses_the_application_tray(self) -> None:
+        from client.v2.application import MainWindow
+
+        fake = Mock()
+        fake._tray = Mock()
+        MainWindow._show_test_notification(fake)
+        fake._tray.showMessage.assert_called_once()
 
     def test_settings_groups_real_controls_and_marks_unsupported_preferences(self) -> None:
         from client.network import NetworkClient
@@ -546,6 +1419,13 @@ class V2UiTests(unittest.TestCase):
         page.update_state("auth", store.state)
         self.app.processEvents()
 
+        labels = {label.text() for label in page.findChildren(QLabel)}
+        self.assertIn("账号", labels)
+        self.assertIn("昵称", labels)
+        self.assertEqual(page.username_edit.accessibleName(), "账号")
+        self.assertEqual(page.display_name_edit.accessibleName(), "昵称")
+        self.assertEqual(page.save_identity.text(), "保存")
+
         self.assertEqual(page.settings_nav.count(), 6)
         self.assertTrue(page.compact_nav.isVisible())
         self.assertFalse(page.settings_sidebar.isVisible())
@@ -554,9 +1434,25 @@ class V2UiTests(unittest.TestCase):
         self.assertEqual(page.agent_setting_status.text(), "Agent 在线")
         self.assertIn("qwen-test", page.agent_setting_model.text())
         planned = [label for label in page.findChildren(QLabel) if label.objectName() == "PlannedBadge"]
-        self.assertGreaterEqual(len(planned), 5)
-        self.assertTrue(all(label.text() == "待实现" for label in planned))
+        self.assertEqual(planned, [])
+        self.assertNotIn("已分离", labels)
         self.assertEqual(page.theme_mode.count(), 3)
+        self.assertIsNotNone(page.enter_to_send)
+        self.assertIsNotNone(page.message_density)
+        self.assertIsNotNone(page.export_diagnostics)
+        self.assertIsNotNone(page.test_notification)
+        self.assertIsNotNone(page.notify_enabled)
+        self.assertIsNotNone(page.do_not_disturb)
+        self.assertIsNotNone(page.notify_sound)
+
+        from PySide6.QtCore import QSettings
+
+        density_values: list[str] = []
+        page.density_changed.connect(density_values.append)
+        page.message_density.setCurrentIndex(page.message_density.findData("compact"))
+        self.assertEqual(density_values[-1], "compact")
+        self.assertEqual(QSettings().value("ui/message_density"), "compact")
+        page.message_density.setCurrentIndex(page.message_density.findData("default"))
 
     def test_mention_editor_waits_for_chinese_input_method_commit(self) -> None:
         from PySide6.QtGui import QInputMethodEvent
@@ -617,6 +1513,107 @@ class V2UiTests(unittest.TestCase):
         )
         self.assertEqual(target.toPlainText(), "")
         self.assertEqual(target.mentions(), [])
+
+    def test_agent_manager_and_memory_dialogs_render_existing_state(self) -> None:
+        from PySide6.QtWidgets import QListWidget, QTextEdit
+
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import AgentManagerDialog, MemoryDialog
+
+        store = AppStore()
+        store.state.authenticated = True
+        store.state.current_user = {"id": 1, "username": "alice"}
+        store.state.current_conversation = ConversationKey("group", "7")
+        store.state.agents = [
+            {
+                "id": "agent",
+                "name": "AI Agent",
+                "description": "默认助手",
+                "enabled": True,
+                "memory_enabled": True,
+                "can_manage": False,
+                "card": {"personality": "可靠", "background": "", "language_style": "", "behavior_rules": ""},
+            },
+            {
+                "id": "agent_taffy",
+                "name": "永雏塔菲",
+                "description": "跟踪进度",
+                "enabled": True,
+                "memory_enabled": True,
+                "builtin": True,
+                "can_manage": False,
+                "card": {"personality": "务实", "background": "", "language_style": "", "behavior_rules": ""},
+            },
+        ]
+        store.state.agent_models = [{"id": "default", "name": "默认模型", "model": "demo", "is_default": True}]
+        store.state.tool_definitions = [
+            {"name": "read_conversation_messages", "label": "读取会话", "mode": "auto"}
+        ]
+        store.state.agent_tools["agent"] = [
+            {"name": "read_conversation_messages", "label": "读取会话", "mode": "auto", "enabled": True}
+        ]
+        store.state.groups = [{"id": 7, "name": "项目组", "joined": 1}]
+        store.state.memories[("agent", "group", "7")] = [
+            {"id": 3, "agent_id": "agent", "scope_type": "group", "scope_id": "7", "kind": "decision", "content": "周五发布"}
+        ]
+        store.state.memory_settings[("agent", "group", "7")] = True
+        service = ChatService(NetworkClient("127.0.0.1", 9), store)
+
+        manager = AgentManagerDialog(service, store, group_id="7")
+        manager.show()
+        self.app.processEvents()
+        self.assertEqual(manager.group_combo.currentData(), "7")
+        self.assertEqual(manager.add_group.text(), "加入当前群")
+        self.assertTrue(any("预设" in manager.agent_list.item(index).text() for index in range(manager.agent_list.count())))
+        manager.agent_list.setCurrentRow(0)
+        manager._selection_changed(manager.agent_list.item(0), None)
+        self.app.processEvents()
+        self.assertEqual(manager.name_edit.text(), "AI Agent")
+        self.assertGreaterEqual(len(manager.findChildren(QTextEdit)), 4)
+        manager.close()
+
+        memories = MemoryDialog(service, store)
+        memories.show()
+        self.app.processEvents()
+        listing = memories.findChild(QListWidget)
+        self.assertIsNotNone(listing)
+        self.assertIn("周五发布", listing.item(0).text())
+        self.assertTrue(memories.enabled_check.isChecked())
+        memories.close()
+
+    def test_group_details_expose_agent_management_and_presets(self) -> None:
+        from PySide6.QtWidgets import QComboBox
+
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.details import ConversationDetailsPanel
+
+        store = AppStore()
+        store.state.current_user = {"id": 1, "role": "user"}
+        key = ConversationKey("group", "7")
+        store.state.current_conversation = key
+        store.state.members_by_group["7"] = [
+            {"id": 1, "member_id": "user:1", "username": "alice", "kind": "user", "group_role": "owner"}
+        ]
+        store.state.group_permissions["7"] = {"can_manage_members": True, "can_manage_schedule": True}
+        store.state.agents = [
+            {"id": "agent", "name": "AI Agent", "enabled": True, "builtin": False},
+            {"id": "agent_taffy", "name": "永雏塔菲", "enabled": True, "builtin": True},
+        ]
+        store.state.group_agents["7"] = [
+            {"id": "agent", "member_id": "agent", "name": "AI Agent", "enabled": True, "builtin": False}
+        ]
+        details = ConversationDetailsPanel(ChatService(NetworkClient("127.0.0.1", 9), store))
+        details.set_context(key, "项目组", store.state)
+        combo = details.agents.findChild(QComboBox)
+        self.assertIsNotNone(combo)
+        self.assertEqual(combo.currentData(), "agent_taffy")
+        self.assertIn("预设", combo.currentText())
+        self.assertTrue(details.agents.add_button.isEnabled())
+        details.close()
 
 
 if __name__ == "__main__":

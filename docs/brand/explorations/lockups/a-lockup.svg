@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 256" width="640" height="256">
+<g transform="translate(24,28) scale(0.75)">
+<path fill="#111111" fill-rule="evenodd" d="
+M 128 36 A 88 88 0 1 1 127.9 36 Z
+M 128 68 A 56 56 0 1 1 127.9 68 Z
+M 104 180 H 136 V 212 H 104 Z
+"/>
+<path fill="#111111" d="M 158 207 L 190 186 L 178 224 Z"/>
+</g>
+<text x="240" y="128" font-family="Helvetica Neue, Arial, sans-serif" font-size="96" font-weight="700" fill="#111111" letter-spacing="-2">AI Agent</text>
+<text x="240" y="190" font-family="PingFang SC, Helvetica Neue, Arial, sans-serif" font-size="28" fill="#6B7280" letter-spacing="2">智能聊天室</text>
+</svg>

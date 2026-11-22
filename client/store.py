@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -50,15 +51,20 @@ class AppStore:
         if not isinstance(payload, dict):
             payload = {}
         request_id = str(event.get("request_id", ""))
-        if event_type in {
-            "ack",
-            "error",
-            "auth.result",
-            "history.result",
-            "profile.avatar.result",
-            "group.members",
-            "agent.schedule.updated",
-        }:
+        if event_type == "network.send_failed":
+            failed_id = str(payload.get("request_id", ""))
+            self.state.pending.pop(failed_id, None)
+            self.state.failed_send = self.state.pending_sends.pop(failed_id, None)
+            self.state.last_error = "发送状态不确定；重连后请核对消息列表，再决定是否重试"
+            self.notify("send_failed")
+            self.notify("error")
+            return
+        if event_type == "error" and request_id in self.state.pending_sends:
+            self.state.failed_send = self.state.pending_sends.pop(request_id)
+            self.notify("send_failed")
+        if event_type == "ack":
+            self.state.pending_sends.pop(request_id, None)
+        if request_id:
             self.state.pending.pop(request_id, None)
 
         if event_type == "network.connected":
@@ -68,6 +74,13 @@ class AppStore:
             return
         if event_type in {"network.disconnected", "network.reconnecting"}:
             self.state.connected = False
+            if self.state.pending_sends:
+                self.state.failed_send = list(self.state.pending_sends.values())[-1]
+                self.state.pending_sends.clear()
+                self.state.last_error = "连接中断；请核对消息列表中的发送结果"
+                self.notify("send_failed")
+                self.notify("error")
+            self.state.pending.clear()
             if event_type == "network.disconnected":
                 self.state.authenticated = False
             delay = payload.get("delay")
@@ -92,14 +105,24 @@ class AppStore:
             for message in payload.get("offline_messages", []):
                 if isinstance(message, dict):
                     self._merge_message(message)
+            self._apply_events(payload.get("offline_events", []))
+            self.state.event_cursor = max(self.state.event_cursor, int(payload.get("event_cursor", 0)))
+            self.state.events_has_more = bool(payload.get("events_has_more", False))
             self.notify("auth")
+            return
+        if event_type == "history.events":
+            self._apply_events(payload.get("events", []))
+            self.state.event_cursor = max(self.state.event_cursor, int(payload.get("cursor", 0)))
+            self.state.events_has_more = bool(payload.get("has_more", False))
+            self.notify("messages")
+            self.notify("events")
             return
         if event_type == "conversation.list":
             records = payload.get("conversations", [])
             self.state.conversations = [self._conversation(item) for item in records if isinstance(item, dict)]
             self.notify("conversations")
             return
-        if event_type in {"message.event", "agent.result"}:
+        if event_type in {"message.event", "message.edited", "agent.result"}:
             message = payload.get("message")
             if isinstance(message, dict):
                 self._merge_message(message)
@@ -112,18 +135,38 @@ class AppStore:
                 self._merge_message(synthetic)
             if payload.get("status") == "failed" or payload.get("success") is False:
                 self.state.last_error = str(payload.get("error", "Agent 调用失败"))
+            if event_type == "agent.result":
+                key = ConversationKey.from_payload(payload, self._current_user_id())
+                run_id = int(payload.get("run_id", 0) or 0)
+                if key and run_id:
+                    if payload.get("status") == "running":
+                        self.state.agent_runs[run_id] = {"key": key, "name": str(payload.get("agent_name") or "Agent"), "tool": ""}
+                        self.state.agent_notices.pop(key, None)
+                    else:
+                        self.state.agent_runs.pop(run_id, None)
+                        if payload.get("status") == "failed":
+                            self.state.agent_notices[key] = f"Agent 回复失败：{self.state.last_error}"
             self.notify("agent_result" if event_type == "agent.result" else "messages")
+            return
+        if event_type == "agent.sticker.result":
+            key = ConversationKey.from_payload(payload, self._current_user_id())
+            if key:
+                self.state.agent_notices[key] = str(payload.get("reason") or "表情包发送失败")
+            self.notify("agent_result")
             return
         if event_type == "history.result":
             key = ConversationKey.from_payload(payload, self._current_user_id())
             if key:
                 results = [dict(item) for item in payload.get("messages", []) if isinstance(item, dict)]
                 if payload.get("search"):
-                    self.state.search_results[key] = results
+                    self.state.search_results[key] = (self.state.search_results.get(key, []) + results) if payload.get("before_id") else results
+                    self.state.search_has_more[key] = bool(payload.get("has_more", False))
                     self.notify("search")
                     return
                 for message in results:
                     self._merge_message(message, fallback=key)
+                if payload.get("before_id") is None:
+                    self.state.history_loaded_at[key] = time.monotonic()
             self.notify("history")
             return
         if event_type in {"message.recall", "message.recalled"}:
@@ -132,9 +175,12 @@ class AppStore:
             for records in self.state.messages.values():
                 for message in records:
                     if str(message.get("id", message.get("message_id", ""))) == message_id:
+                        if int(message.get("event_id", 0) or 0) > int(recalled.get("event_id", 0) or 0):
+                            continue
                         message.update(recalled)
                         message["recalled"] = True
                         message["content"] = ""
+                        message.pop("image_data", None)
             self.notify("messages")
             return
         if event_type == "media.result":
@@ -169,6 +215,16 @@ class AppStore:
                 self.state.schedules_by_group[group_id] = dict(schedule)
             if self.state.current_conversation == ConversationKey("group", group_id):
                 self.state.members = members
+            self.notify("details")
+            return
+        if event_type == "group.nickname.updated":
+            group_id = str(payload.get("group_id", ""))
+            user_id = str(payload.get("user_id", ""))
+            for member in self.state.members_by_group.get(group_id, []):
+                if str(member.get("id")) == user_id:
+                    member["nickname"] = payload.get("nickname")
+            if self.state.current_conversation == ConversationKey("group", group_id):
+                self.state.members = self.state.members_by_group.get(group_id, [])
             self.notify("details")
             return
         if event_type == "moderation.changed":
@@ -225,6 +281,93 @@ class AppStore:
             self.state.agent_model = str(payload.get("model", ""))
             self.notify("agent")
             return
+        if event_type == "agent.list":
+            self.state.agents = [dict(item) for item in payload.get("agents", [])]
+            self.state.agent_models = [dict(item) for item in payload.get("models", [])]
+            self.state.agent_presets = [dict(item) for item in payload.get("presets", [])]
+            self.notify("agents")
+            return
+        if event_type == "agent.models.list":
+            self.state.agent_models = [dict(item) for item in payload.get("models", [])]
+            self.notify("agents")
+            return
+        if event_type in {"agent.created", "agent.updated", "agent.changed"}:
+            agent = payload.get("agent")
+            if isinstance(agent, dict):
+                self._upsert(self.state.agents, dict(agent))
+                if not agent.get("enabled", True):
+                    self._remove_agent_from_members(str(agent.get("id", "")))
+                else:
+                    for group_id, members in self.state.members_by_group.items():
+                        for member in members:
+                            if member.get("kind") == "agent" and str(member.get("id")) == str(agent.get("id")):
+                                member.update({key: agent.get(key) for key in ("username", "display_name", "avatar_version", "avatar_mime")})
+            elif payload.get("agent_id"):
+                self._remove_agent(str(payload["agent_id"]))
+            if payload.get("group_id") and isinstance(payload.get("group_agents"), list):
+                self._set_group_agents(
+                    str(payload["group_id"]),
+                    [dict(item) for item in payload["group_agents"]],
+                )
+            self.notify("agents")
+            self.notify("details")
+            return
+        if event_type in {"agent.deleted"}:
+            self._remove_agent(str(payload.get("agent_id", "")))
+            self.notify("agents")
+            return
+        if event_type == "agent.avatar.result":
+            agent_id = str(payload.get("agent_id", ""))
+            if agent_id:
+                self.state.agent_avatar_cache[agent_id] = dict(payload)
+            self.notify("avatar")
+            return
+        if event_type in {"agent.tools.list", "agent.tools.updated"}:
+            agent_id = str(payload.get("agent_id", ""))
+            self.state.agent_tools[agent_id] = [dict(item) for item in payload.get("tools", [])]
+            self.notify("agents")
+            return
+        if event_type == "tool.list":
+            self.state.tool_definitions = [dict(item) for item in payload.get("tools", [])]
+            self.notify("tools")
+            return
+        if event_type in {"agent.group.list", "agent.group.updated"}:
+            group_id = str(payload.get("group_id", ""))
+            agents = [dict(item) for item in payload.get("agents", [])]
+            self._set_group_agents(group_id, agents)
+            self.notify("agents")
+            self.notify("details")
+            return
+        if event_type in {"agent.group.tools.list", "agent.group.tools.updated"}:
+            agent_id = str(payload.get("agent_id", ""))
+            if agent_id:
+                self.state.agent_tools[agent_id] = [dict(item) for item in payload.get("tools", [])]
+            self.notify("agents")
+            return
+        if event_type == "memory.list":
+            key = (str(payload.get("agent_id", "")), str(payload.get("scope_type", "")), str(payload.get("scope_id", "")))
+            self.state.memories[key] = [dict(item) for item in payload.get("memories", [])]
+            self.state.memory_settings[key] = bool(payload.get("enabled", False))
+            self.notify("memories")
+            return
+        if event_type in {"memory.saved", "memory.updated"}:
+            memory = payload.get("memory")
+            if isinstance(memory, dict):
+                key = (str(memory.get("agent_id", "")), str(memory.get("scope_type", "")), str(memory.get("scope_id", "")))
+                self._upsert(self.state.memories.setdefault(key, []), dict(memory))
+            self.notify("memories")
+            return
+        if event_type == "memory.deleted":
+            memory_id = str(payload.get("memory_id", ""))
+            for records in self.state.memories.values():
+                records[:] = [item for item in records if str(item.get("id")) != memory_id]
+            self.notify("memories")
+            return
+        if event_type in {"memory.settings.result", "memory.settings.updated"}:
+            key = (str(payload.get("agent_id", "")), str(payload.get("scope_type", "")), str(payload.get("scope_id", "")))
+            self.state.memory_settings[key] = bool(payload.get("enabled", False))
+            self.notify("memories")
+            return
         if event_type == "agent.activity.list":
             self.state.activities = [dict(item) for item in payload.get("activities", [])]
             self.notify("activities")
@@ -236,14 +379,25 @@ class AppStore:
         if event_type == "tool.call.event":
             record = payload.get("tool_call") if isinstance(payload.get("tool_call"), dict) else payload
             self._upsert(self.state.tool_calls, dict(record))
+            run = self.state.agent_runs.get(int(record.get("run_id", 0) or 0))
+            if run:
+                run["tool"] = str(record.get("tool_name") or "") if record.get("status") == "running" else ""
+            if record.get("status") in {"failed", "denied"}:
+                key = ConversationKey.from_payload(payload, self._current_user_id())
+                if key:
+                    self.state.agent_notices[key] = f"工具执行失败：{record.get('error') or record.get('tool_name')}"
             self.notify("tools")
+            self.notify("agent_result")
             return
         if event_type == "system.status":
             self.state.system_status = dict(payload)
             self.notify("system")
             return
         if event_type == "error":
-            self.state.last_error = str(payload.get("message", payload.get("error", "请求失败")))
+            message = str(payload.get("message", payload.get("error", "请求失败")))
+            if message in {"未知消息类型：profile.identity.set", "未知消息类型：group.nickname.set"}:
+                message = "服务端版本过旧，请重启服务端后重试"
+            self.state.last_error = message
             self.notify("error")
             return
         if event_type == "ack":
@@ -273,11 +427,22 @@ class AppStore:
         message_id = str(message.get("id", message.get("message_id", "")))
         for current in records:
             if message_id and str(current.get("id", current.get("message_id", ""))) == message_id:
+                if int(current.get("event_id", 0) or 0) > int(message.get("event_id", 0) or 0):
+                    if message.get("image_data") and not current.get("recalled"):
+                        current["image_data"] = message["image_data"]
+                    break
                 current.update(message)
+                if current.get("recalled"):
+                    current.pop("image_data", None)
                 break
         else:
             records.append(dict(message))
-        records.sort(key=lambda item: (float(item.get("created_at", item.get("timestamp", 0)) or 0), str(item.get("id", ""))))
+        records.sort(key=lambda item: int(item.get("id", item.get("message_id", 0)) or 0))
+
+    def _apply_events(self, events: Any) -> None:
+        for event in events if isinstance(events, list) else []:
+            if isinstance(event, dict) and isinstance(event.get("message"), dict):
+                self._merge_message(event["message"])
 
     @staticmethod
     def _upsert(records: list[dict[str, Any]], item: dict[str, Any]) -> None:
@@ -287,6 +452,44 @@ class AppStore:
                 current.update(item)
                 return
         records.insert(0, item)
+
+    def _remove_agent(self, agent_id: str) -> None:
+        if not agent_id:
+            return
+        self.state.agents[:] = [
+            item for item in self.state.agents if str(item.get("id", "")) != agent_id
+        ]
+        self._remove_agent_from_members(agent_id)
+
+    def _remove_agent_from_members(self, agent_id: str) -> None:
+        if not agent_id:
+            return
+        for members in self.state.members_by_group.values():
+            members[:] = [
+                item for item in members
+                if not (item.get("kind") == "agent" and str(item.get("id", "")) == agent_id)
+            ]
+
+    def _set_group_agents(self, group_id: str, agents: list[dict[str, Any]]) -> None:
+        self.state.group_agents[group_id] = agents
+        if group_id not in self.state.members_by_group:
+            return
+        humans = [
+            item for item in self.state.members_by_group[group_id]
+            if item.get("kind") != "agent"
+        ]
+        agent_members = [
+            {
+                **item,
+                "username": item.get("name") or item.get("username"),
+                "display_name": item.get("name") or item.get("display_name"),
+                "kind": "agent",
+            }
+            for item in agents if item.get("enabled", True)
+        ]
+        self.state.members_by_group[group_id] = humans + agent_members
+        if self.state.current_conversation == ConversationKey("group", group_id):
+            self.state.members = self.state.members_by_group[group_id]
 
     @staticmethod
     def _upsert_user(records: list[dict[str, Any]], item: dict[str, Any]) -> dict[str, Any]:

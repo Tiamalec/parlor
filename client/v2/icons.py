@@ -9,7 +9,7 @@ from PySide6.QtGui import QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
 from . import icons_rc  # noqa: F401  # registers :/icons resources
-from .theme import active_theme_manager, current_tokens
+from .theme import ThemeVariant, active_theme_manager, current_tokens
 
 
 NAVIGATION_ICONS = {
@@ -73,3 +73,33 @@ def lucide_icon(name: str, logical_size: int = 20) -> QIcon:
         for dpr in (1, 2):
             icon.addPixmap(_render_pixmap(name, color, logical_size, dpr, revision), mode, state)
     return icon
+
+
+def lucide_icon_with_color(name: str, color: str, logical_size: int = 20) -> QIcon:
+    """Return a single-color icon for surfaces that need a specific token color."""
+    revision = _theme_revision()
+    icon = QIcon()
+    for dpr in (1, 2):
+        icon.addPixmap(_render_pixmap(name, color, logical_size, dpr, revision))
+    return icon
+
+
+@lru_cache(maxsize=32)
+def _brand_icon(name: str, logical_size: int, revision: int) -> QIcon:
+    icon = QIcon()
+    for dpr in (1, 2):
+        icon.addPixmap(_render_pixmap(name, "#000000", logical_size, dpr, revision))
+    return icon
+
+
+def brand_logo_icon(logical_size: int = 30) -> QIcon:
+    """Return the two-colour chat-room mark for the current theme."""
+    manager = active_theme_manager()
+    dark = manager is not None and manager.snapshot.variant == ThemeVariant.DARK
+    name = "brand-logo-dark" if dark else "brand-logo-light"
+    return _brand_icon(name, logical_size, _theme_revision())
+
+
+def brand_app_icon(logical_size: int = 64) -> QIcon:
+    """Return the app/tray icon: the mark on its Agent-purple tile."""
+    return _brand_icon("brand-app-icon", logical_size, _theme_revision())

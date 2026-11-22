@@ -21,6 +21,42 @@ class ClientStoreTests(unittest.TestCase):
             }
         )
 
+    def test_group_nickname_updates_only_its_group(self) -> None:
+        from client.profile import resolve_profile
+
+        for group_id in ("7", "8"):
+            self.store.handle_event({"type": "group.members", "payload": {
+                "group_id": group_id, "members": [{"id": 2, "username": "bob01", "display_name": "小博", "nickname": "旧名"}],
+            }})
+        self.store.handle_event({"type": "group.nickname.updated", "payload": {
+            "group_id": 7, "user_id": 2, "nickname": "研发小博",
+        }})
+        first = self.store.state.members_by_group["7"][0]
+        second = self.store.state.members_by_group["8"][0]
+        self.assertEqual(resolve_profile(self.store.state, 2, first).display_name, "研发小博")
+        self.assertEqual(resolve_profile(self.store.state, 2, second).display_name, "旧名")
+        self.assertEqual(resolve_profile(self.store.state, 2, {"id": 2}).display_name, "小博")
+
+    def test_old_server_name_request_has_actionable_error(self) -> None:
+        self.store.handle_event({"type": "error", "payload": {
+            "message": "未知消息类型：profile.identity.set",
+        }})
+        self.assertEqual(self.store.state.last_error, "服务端版本过旧，请重启服务端后重试")
+
+    def test_list_responses_clear_pending_requests(self) -> None:
+        cases = (
+            ("presence-1", "presence.list", {"users": []}),
+            ("groups-1", "group.list", {"groups": []}),
+            ("activity-1", "agent.activity.list", {"activities": []}),
+            ("status-1", "agent.status", {"online": False}),
+        )
+        for request_id, event_type, payload in cases:
+            self.store.set_pending(request_id, event_type)
+            self.store.handle_event(
+                {"type": event_type, "request_id": request_id, "payload": payload}
+            )
+            self.assertNotIn(request_id, self.store.state.pending)
+
     def test_conversation_projection_and_message_merge(self) -> None:
         self.store.handle_event(
             {
@@ -90,6 +126,35 @@ class ClientStoreTests(unittest.TestCase):
         )
         self.assertTrue(self.store.state.messages[key][0]["recalled"])
         self.assertEqual(self.store.state.messages[key][0]["content"], "")
+
+    def test_replay_keeps_newest_message_version_and_stable_order(self) -> None:
+        key = ConversationKey("group", "7")
+        base = {"conversation_type": "group", "conversation_id": "7", "sender_id": 2}
+        self.store.handle_event({"type": "message.edited", "payload": {"message": {**base, "id": 10, "content": "edited", "event_id": 3, "edited": True}}})
+        self.store.handle_event({"type": "history.result", "payload": {"conversation_type": "group", "conversation_id": "7", "messages": [{**base, "id": 10, "content": "old", "event_id": 1}, {**base, "id": 9, "content": "earlier"}]}})
+        self.assertEqual([item["id"] for item in self.store.state.messages[key]], [9, 10])
+        self.assertEqual(self.store.state.messages[key][1]["content"], "edited")
+        self.store.handle_event({"type": "history.events", "payload": {"events": [{"event_type": "message.recalled", "message": {**base, "id": 10, "content": "", "recalled": True, "event_id": 4}}], "cursor": 4, "has_more": False}})
+        self.assertTrue(self.store.state.messages[key][1]["recalled"])
+        self.assertEqual(self.store.state.event_cursor, 4)
+
+    def test_send_failure_keeps_draft_for_recovery(self) -> None:
+        key = ConversationKey("group", "7")
+        self.store.set_pending("send-1", "message.send")
+        self.store.state.pending_sends["send-1"] = (key, "unsent text", [], None)
+        self.store.handle_event({"type": "network.send_failed", "payload": {"request_id": "send-1"}})
+        self.assertEqual(self.store.state.failed_send, (key, "unsent text", [], None))
+        self.assertNotIn("send-1", self.store.state.pending)
+
+    def test_media_result_enriches_versioned_image_without_reviving_recall(self) -> None:
+        key = ConversationKey("group", "7")
+        base = {"id": 8, "conversation_type": "group", "conversation_id": "7", "message_type": "image"}
+        self.store.handle_event({"type": "message.event", "payload": {"message": {**base, "event_id": 10}}})
+        self.store.handle_event({"type": "media.result", "payload": {"message": {**base, "image_data": "encoded"}}})
+        self.assertEqual(self.store.state.messages[key][0]["image_data"], "encoded")
+        self.store.handle_event({"type": "message.recalled", "payload": {"message": {**base, "event_id": 11, "recalled": True}}})
+        self.store.handle_event({"type": "media.result", "payload": {"message": {**base, "image_data": "late"}}})
+        self.assertNotEqual(self.store.state.messages[key][0].get("image_data"), "late")
 
     def test_delayed_profile_event_cannot_roll_back_avatar_version(self) -> None:
         self.store.state.users = [

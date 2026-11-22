@@ -17,7 +17,7 @@ def load_dotenv(path: Path) -> None:
             raise PermissionError(f"配置文件所有者不安全：{path}")
         if stat.S_IMODE(metadata.st_mode) & 0o077:
             raise PermissionError(f"配置文件权限过宽，请执行 chmod 600 {path}")
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -61,6 +61,7 @@ class Config:
     admin_log_capacity: int
     admin_cookie_secure: bool
     admin_max_body_bytes: int
+    sticker_auto_interval_seconds: int = 90
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -97,6 +98,7 @@ class Config:
             admin_session_ttl_seconds=max(300, int(os.getenv("ADMIN_SESSION_TTL_SECONDS", "28800"))),
             admin_log_capacity=max(100, min(int(os.getenv("ADMIN_LOG_CAPACITY", "500")), 5000)),
             admin_cookie_secure=_bool("ADMIN_COOKIE_SECURE", False),
-            admin_max_body_bytes=max(1024, min(int(os.getenv("ADMIN_MAX_BODY_BYTES", "65536")), 1048576)),
+            admin_max_body_bytes=max(1024, min(int(os.getenv("ADMIN_MAX_BODY_BYTES", "3000000")), 3000000)),
+            sticker_auto_interval_seconds=max(10, int(os.getenv("STICKER_AUTO_INTERVAL_SECONDS", "90"))),
         )
 

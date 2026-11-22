@@ -216,6 +216,22 @@ class AdminHttpServer:
             )
         if request.path == "/api/v1/admin/me" and request.method == "GET":
             return Response.json(session.public_dict())
+        if request.path == "/api/v1/admin/stickers" and request.method == "GET":
+            return Response.json({"stickers": await self.service.stickers()})
+        if request.path == "/api/v1/admin/stickers" and request.method == "POST":
+            return Response.json(await self.service.save_sticker(session, request.json()), status=201)
+        sticker_prefix = "/api/v1/admin/stickers/"
+        if request.path.startswith(sticker_prefix):
+            suffix = request.path[len(sticker_prefix):]
+            parts = suffix.split("/")
+            if len(parts) == 1 and parts[0]:
+                if request.method == "POST":
+                    return Response.json(await self.service.save_sticker(session, request.json(), parts[0]))
+                if request.method == "DELETE":
+                    return Response.json(await self.service.delete_sticker(session, parts[0]))
+            if len(parts) == 2 and parts[0] and parts[1] == "media" and request.method == "GET":
+                raw, mime = await self.service.sticker_media(parts[0])
+                return Response(200, raw, content_type=mime)
         if request.path == "/api/v1/admin/dashboard" and request.method == "GET":
             return Response.json(await self.service.dashboard())
         if request.path == "/api/v1/admin/logs" and request.method == "GET":
@@ -229,6 +245,28 @@ class AdminHttpServer:
             )
         if request.path == "/api/v1/admin/agents/status" and request.method == "GET":
             return Response.json(self.service.agent.status())
+        if request.path == "/api/v1/admin/agents" and request.method == "GET":
+            return Response.json({"agents": await self.service.agent_cards(session)})
+        if request.path == "/api/v1/admin/role-cards" and request.method == "GET":
+            return Response.json({"role_cards": await self.service.role_cards(session)})
+        if request.path == "/api/v1/admin/role-cards" and request.method == "POST":
+            return Response.json(
+                await self.service.save_role_card(session, request.json()), status=201
+            )
+        role_card_prefix = "/api/v1/admin/role-cards/"
+        if request.path.startswith(role_card_prefix):
+            agent_id = request.path[len(role_card_prefix):]
+            if agent_id and "/" not in agent_id:
+                if request.method == "POST":
+                    return Response.json(
+                        await self.service.save_role_card(
+                            session, request.json(), agent_id
+                        )
+                    )
+                if request.method == "DELETE":
+                    return Response.json(
+                        await self.service.delete_role_card(session, agent_id)
+                    )
         if request.path == "/api/v1/admin/agents/enabled" and request.method == "POST":
             payload = request.json()
             if "enabled" not in payload or type(payload["enabled"]) is not bool:

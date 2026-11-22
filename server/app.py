@@ -6,6 +6,7 @@ import binascii
 import contextlib
 import logging
 import mimetypes
+import re
 import struct
 import time
 import uuid
@@ -16,6 +17,7 @@ from typing import Any
 from shared.protocol import ProtocolError, encode_frame, envelope, read_frame
 
 from .agent import AgentService
+from .agent_config import BUILTIN_AGENT_PRESETS
 from .config import Config
 from .database import Database, DatabaseError, dm_conversation_id, dm_participants
 
@@ -226,6 +228,7 @@ class ChatServer:
             handlers = {
                 "presence.list": self._presence_list,
                 "profile.avatar.set": self._profile_avatar_set,
+                "profile.identity.set": self._profile_identity_set,
                 "profile.avatar.get": self._profile_avatar_get,
                 "auth.logout": self._auth_logout,
                 "group.list": self._group_list,
@@ -233,12 +236,15 @@ class ChatServer:
                 "group.join": self._group_join,
                 "group.leave": self._group_leave,
                 "group.members": self._group_members,
+                "group.nickname.set": self._group_nickname_set,
                 "conversation.list": self._conversation_list,
                 "message.send": self._message_send,
+                "message.edit": self._message_edit,
                 "message.recall": self._message_recall,
                 "media.get": self._media_get,
                 "history.sync": self._history_sync,
                 "history.search": self._history_search,
+                "history.events": self._history_events,
                 "history.read": self._history_read,
                 "moderation.mute": self._moderation_mute,
                 "moderation.unmute": self._moderation_unmute,
@@ -246,7 +252,28 @@ class ChatServer:
                 "agent.status": self._agent_status,
                 "agent.activity.list": self._agent_activity_list,
                 "agent.schedule.set": self._agent_schedule,
+                "agent.list": self._agent_list,
+                "agent.create": self._agent_create,
+                "agent.update": self._agent_update,
+                "agent.delete": self._agent_delete,
+                "agent.avatar.set": self._agent_avatar_set,
+                "agent.avatar.get": self._agent_avatar_get,
+                "agent.tool.list": self._agent_tool_list,
+                "agent.tool.set": self._agent_tool_set,
+                "agent.group.list": self._agent_group_list,
+                "agent.group.set": self._agent_group_set,
+                "agent.group.tools.list": self._agent_group_tools_list,
+                "agent.group.tools.set": self._agent_group_tools_set,
+                "agent.group.sticker.set": self._agent_group_sticker_set,
+                "agent.models.list": self._agent_models_list,
+                "memory.list": self._memory_list,
+                "memory.add": self._memory_add,
+                "memory.update": self._memory_update,
+                "memory.delete": self._memory_delete,
+                "memory.settings.get": self._memory_settings_get,
+                "memory.settings.set": self._memory_settings_set,
                 "tool.calls.list": self._tool_calls_list,
+                "tool.list": self._tool_list,
                 "system.status": self._system_status,
             }
             handler = handlers.get(message_type)
@@ -271,9 +298,13 @@ class ChatServer:
             self.database.authenticate, str(payload.get("username", "")), str(payload.get("password", ""))
         )
         if not user:
-            raise DatabaseError("用户名或密码错误")
+            raise DatabaseError("账号或密码错误")
         await self._attach_user(session, user)
-        await session.send("auth.result", await self._bootstrap(user), request_id=request_id)
+        await session.send("auth.result", await self._bootstrap(
+            user,
+            after_event_id=max(0, int(payload.get("after_event_id", 0))),
+            include_legacy_offline="after_event_id" not in payload,
+        ), request_id=request_id)
 
     async def _attach_user(self, session: ClientSession, user: dict[str, Any]) -> None:
         if session.user and session.user["id"] != user["id"]:
@@ -288,15 +319,18 @@ class ChatServer:
         await self._detach_user(session)
         await session.send("ack", {"action": "auth.logout"}, request_id=request_id)
 
-    async def _bootstrap(self, user: dict[str, Any], *, registered: bool = False) -> dict[str, Any]:
-        users, groups, offline = await asyncio.gather(
+    async def _bootstrap(self, user: dict[str, Any], *, registered: bool = False, after_event_id: int = 0,
+                         include_legacy_offline: bool = True) -> dict[str, Any]:
+        users, groups = await asyncio.gather(
             asyncio.to_thread(self.database.list_users),
             asyncio.to_thread(self.database.list_groups, int(user["id"])),
-            asyncio.to_thread(self.database.sync_for_user, int(user["id"])),
         )
         for item in users:
             item["online"] = int(item["id"]) in self.sessions_by_user
-        offline = [await self._with_image_data(message) for message in offline]
+        offline = await asyncio.to_thread(self.database.sync_for_user, int(user["id"])) if include_legacy_offline else []
+        if include_legacy_offline:
+            offline = [await self._with_image_data(message) for message in offline]
+        changes = await asyncio.to_thread(self.database.message_events_for_user, int(user["id"]), after_event_id)
         return {
             "ok": True,
             "registered": registered,
@@ -304,6 +338,9 @@ class ChatServer:
             "users": users,
             "groups": groups,
             "offline_messages": offline,
+            "offline_events": changes["events"],
+            "event_cursor": changes["cursor"],
+            "events_has_more": changes["has_more"],
             "agent_online": self.agent.enabled and self.agent.online,
             "capabilities": {
                 "conversation_list": True,
@@ -313,6 +350,10 @@ class ChatServer:
                 "structured_mentions": True,
                 "mention_offsets_codepoints": True,
                 "agent_activity": True,
+                "agent_management": True,
+                "structured_agent_cards": True,
+                "agent_memory": True,
+                "agent_tool_authorization": True,
                 "system_status": user.get("role") == "admin",
             },
         }
@@ -322,6 +363,16 @@ class ChatServer:
         for user in users:
             user["online"] = int(user["id"]) in self.sessions_by_user
         await session.send("presence.list", {"users": users}, request_id=request_id)
+
+    async def _profile_identity_set(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        user = await asyncio.to_thread(
+            self.database.update_identity, int(session.user["id"]),
+            str(payload.get("username", "")), str(payload.get("display_name", "")),
+        )
+        for active in self.sessions_by_user.get(int(user["id"]), set()):
+            active.user.update(user)
+        await session.send("ack", {"action": "profile.identity.set"}, request_id=request_id)
+        await self._broadcast_all("profile.updated", {"user": user})
 
     async def _profile_avatar_set(
         self, session: ClientSession, payload: dict[str, Any], request_id: str
@@ -414,6 +465,17 @@ class ChatServer:
         await session.send("ack", {"action": "group.leave", "group_id": group_id}, request_id=request_id)
         await self._refresh_groups_for_all()
 
+    async def _group_nickname_set(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        group_id = int(payload["group_id"])
+        user_id = int(session.user["id"])
+        nickname = await asyncio.to_thread(
+            self.database.set_group_nickname, group_id, user_id, str(payload.get("nickname", ""))
+        )
+        await session.send("ack", {"action": "group.nickname.set", "group_id": group_id}, request_id=request_id)
+        await self.emit_to_scope("group", str(group_id), "group.nickname.updated", {
+            "group_id": group_id, "user_id": user_id, "nickname": nickname,
+        })
+
     async def _group_members(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
         group_id = int(payload["group_id"])
         actor_id = int(session.user["id"])
@@ -433,18 +495,23 @@ class ChatServer:
                 if can_manage and int(member["id"]) != actor_id
                 else []
             )
-        members.append(
-            {
-                "id": AGENT_MEMBER_ID,
-                "member_id": AGENT_MEMBER_ID,
-                "username": "AI Agent",
-                "kind": "agent",
-                "group_role": "agent",
-                "online": self.agent.enabled and self.agent.online,
-                "avatar_version": 0,
-                "available_actions": [],
-            }
-        )
+        agents = await asyncio.to_thread(self.database.group_agents, group_id, enabled_only=True)
+        for agent in agents:
+            members.append(
+                {
+                    "id": agent["id"],
+                    "member_id": agent["member_id"],
+                    "username": agent["name"],
+                    "display_name": agent["name"],
+                    "description": agent.get("description", ""),
+                    "kind": "agent",
+                    "group_role": "agent",
+                    "online": self.agent.enabled and self.agent.online and bool(agent.get("enabled")),
+                    "avatar_version": int(agent.get("avatar_version", 0) or 0),
+                    "avatar_mime": agent.get("avatar_mime"),
+                    "available_actions": [],
+                }
+            )
         await session.send(
             "group.members",
             {
@@ -471,9 +538,13 @@ class ChatServer:
 
     async def _message_send(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
         scope_type, scope_id = await self._resolve_scope(session, payload)
+        prior = await asyncio.to_thread(self.database.get_message_by_request, int(session.user["id"]), request_id)
+        if prior:
+            await session.send("ack", {"action": "message.send", "message_id": prior["id"], "duplicate": True}, request_id=request_id)
+            return
         message_type = str(payload.get("message_type", "text"))
         content = str(payload.get("content", ""))
-        if message_type not in {"text", "image"}:
+        if message_type not in {"text", "image", "sticker"}:
             raise DatabaseError("消息类型无效")
         if len(content) > MAX_TEXT_LENGTH:
             raise DatabaseError("文本消息过长")
@@ -481,11 +552,35 @@ class ChatServer:
             self.database.is_muted, int(scope_id), int(session.user["id"])
         ):
             raise DatabaseError("你已被该群禁言")
+        reply_to_id = int(payload["reply_to_id"]) if payload.get("reply_to_id") is not None else None
+        reply_preview = None
+        if reply_to_id is not None:
+            original = await asyncio.to_thread(self.database.authorized_message, int(session.user["id"]), reply_to_id)
+            if original["conversation_type"] != scope_type or original["conversation_id"] != scope_id or original["recalled"]:
+                raise DatabaseError("引用消息不属于当前会话或已撤回")
+            if original["message_type"] == "image":
+                preview_content = "[图片]"
+            elif original["message_type"] == "sticker":
+                preview_content = f"[表情包] {original.get('sticker_name') or ''}".strip()
+            elif str((original.get("card") or {}).get("kind")) == "summary":
+                preview_content = "[群聊总结]"
+            elif str((original.get("card") or {}).get("kind")) == "todo":
+                preview_content = "[待办事项]"
+            else:
+                preview_content = original["content"][:80]
+            reply_preview = f"{original['sender_name']}: {preview_content}"
         image_path = image_name = image_mime = None
-        if message_type == "image":
+        if message_type in {"image", "sticker"}:
             image_path, image_name, image_mime = await self._store_image(payload)
         elif not content.strip():
             raise DatabaseError("消息内容不能为空")
+        sticker_id = sticker_name = sticker_category = None
+        if message_type == "sticker":
+            supplied_id = str(payload.get("sticker_id") or request_id).strip()[:80]
+            sticker_id = f"user:{int(session.user['id'])}:{supplied_id or request_id}"
+            sticker_name = str(payload.get("sticker_name") or Path(image_name or "表情包").stem).strip()[:80]
+            sticker_name = sticker_name or "表情包"
+            sticker_category = "用户表情"
         normalized_content = content.strip()
         raw_mentions = self._normalize_mention_offsets(
             content,
@@ -498,32 +593,52 @@ class ChatServer:
             scope_type,
             scope_id,
             int(session.user["id"]),
-            str(session.user["username"]),
+            await asyncio.to_thread(self.database.name_in_scope, int(session.user["id"]), scope_type, scope_id),
             message_type,
             normalized_content,
             image_path=image_path,
             image_name=image_name,
             image_mime=image_mime,
+            sticker_id=sticker_id,
+            sticker_name=sticker_name,
+            sticker_category=sticker_category,
+            sticker_tags=[],
             mentions=mentions,
+            reply_to_id=reply_to_id,
+            reply_preview=reply_preview,
+            client_request_id=request_id,
         )
+        if message.get("duplicate"):
+            await session.send("ack", {"action": "message.send", "message_id": message["id"], "duplicate": True}, request_id=request_id)
+            return
         await asyncio.to_thread(
             self.database.set_read_cursor, int(session.user["id"]), scope_type, scope_id, int(message["id"])
         )
         wire_message = await self._with_image_data(message)
         await self.emit_to_scope(scope_type, scope_id, "message.event", {"message": wire_message})
         await session.send("ack", {"action": "message.send", "message_id": message["id"]}, request_id=request_id)
-        if any(item["kind"] == "agent" for item in mentions):
+        triggered: list[str] = []
+        for item in mentions:
+            if item["kind"] != "agent":
+                continue
+            agent_id = str(item.get("agent_id") or AGENT_MEMBER_ID)
+            if agent_id not in triggered:
+                triggered.append(agent_id)
+        if triggered:
             prompt = normalized_content
             for item in reversed(mentions):
                 if item["kind"] == "agent":
                     start = int(item["start"])
                     prompt = prompt[:start] + prompt[start + int(item["length"]):]
             prompt = prompt.strip() or "请总结最近 50 条消息"
-            self._track(
-                asyncio.create_task(
-                    self.agent.invoke(int(session.user["id"]), scope_type, scope_id, prompt)
+            for agent_id in triggered[:4]:
+                self._track(
+                    asyncio.create_task(
+                        self.agent.invoke(
+                            int(session.user["id"]), scope_type, scope_id, prompt, agent_id
+                        )
+                    )
                 )
-            )
 
     async def _validate_mentions(
         self, scope_type: str, scope_id: str, content: str, raw_mentions: Any
@@ -534,6 +649,10 @@ class ChatServer:
             raise DatabaseError("提及信息仅适用于群聊")
         members = await asyncio.to_thread(self.database.group_members, int(scope_id))
         allowed = {f"user:{member['id']}": member for member in members}
+        agent_rows = await asyncio.to_thread(
+            self.database.group_agents, int(scope_id), enabled_only=True
+        )
+        agents = {agent["member_id"]: agent for agent in agent_rows}
         normalized: list[dict[str, Any]] = []
         previous_end = -1
         for raw in sorted(raw_mentions, key=lambda item: int(item.get("start", -1)) if isinstance(item, dict) else -1):
@@ -542,25 +661,34 @@ class ChatServer:
             member_id = str(raw.get("member_id", ""))
             start = int(raw.get("start", -1))
             length = int(raw.get("length", 0))
-            if member_id == AGENT_MEMBER_ID:
-                kind, display = "agent", "AI Agent"
+            if member_id in agents:
+                kind = "agent"
+                display = str(agents[member_id]["name"])
+                if str(raw.get("display") or content[start + 1:start + length]) != display:
+                    raise DatabaseError("提及名称与 Agent 不一致")
             elif member_id in allowed:
-                kind, display = "user", str(allowed[member_id]["username"])
+                member = allowed[member_id]
+                names = {str(member[key]) for key in ("nickname", "display_name", "username") if member.get(key)}
+                kind = "user"
+                display = str(raw.get("display") or content[start + 1:start + length])
+                if display not in names:
+                    raise DatabaseError("提及名称与成员不一致")
             else:
                 raise DatabaseError("被提及成员不属于当前群聊")
             token = f"@{display}"
             if start < 0 or length != len(token) or start < previous_end or content[start:start + length] != token:
                 raise DatabaseError("提及位置与消息文本不一致")
             previous_end = start + length
-            normalized.append(
-                {
-                    "member_id": member_id,
-                    "kind": kind,
-                    "display": display,
-                    "start": start,
-                    "length": length,
-                }
-            )
+            item = {
+                "member_id": member_id,
+                "kind": kind,
+                "display": display,
+                "start": start,
+                "length": length,
+            }
+            if kind == "agent":
+                item["agent_id"] = agents[member_id]["id"]
+            normalized.append(item)
         return normalized
 
     @staticmethod
@@ -661,7 +789,7 @@ class ChatServer:
             int(session.user["id"]),
             int(payload["message_id"]),
         )
-        if message.get("message_type") != "image" or message.get("recalled"):
+        if message.get("message_type") not in {"image", "sticker"} or message.get("recalled"):
             raise DatabaseError("该消息没有可用图片")
         wire = await self._with_image_data(message)
         if not wire.get("image_data"):
@@ -695,16 +823,37 @@ class ChatServer:
 
     async def _history_search(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
         scope_type, scope_id = await self._resolve_scope(session, payload)
-        messages = await asyncio.to_thread(
+        page = await asyncio.to_thread(
             self.database.search_messages,
             int(session.user["id"]),
             scope_type,
             scope_id,
             str(payload.get("keyword", "")),
             int(payload.get("limit", 50)),
+            int(payload["before_id"]) if payload.get("before_id") is not None else None,
+            paged=True,
         )
-        wire = [await self._with_image_data(message) for message in messages]
-        await session.send("history.result", {"conversation_type": scope_type, "conversation_id": scope_id, "messages": wire, "search": True}, request_id=request_id)
+        await session.send("history.result", {"conversation_type": scope_type, "conversation_id": scope_id,
+                           "messages": page["messages"], "has_more": page["has_more"],
+                           "keyword": str(payload.get("keyword", "")), "before_id": payload.get("before_id"),
+                           "search": True}, request_id=request_id)
+
+    async def _history_events(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        page = await asyncio.to_thread(self.database.message_events_for_user, int(session.user["id"]), max(0, int(payload.get("after_event_id", 0))))
+        await session.send("history.events", page, request_id=request_id)
+
+    async def _message_edit(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        message_id = int(payload["message_id"])
+        original = await asyncio.to_thread(self.database.authorized_message, int(session.user["id"]), message_id)
+        raw_content = str(payload.get("content", ""))
+        content = raw_content.strip()
+        if not content or len(content) > MAX_TEXT_LENGTH:
+            raise DatabaseError("消息内容为空或过长")
+        raw_mentions = self._normalize_mention_offsets(raw_content, payload.get("mentions", []), str(payload.get("mention_index_unit", "unicode_codepoints")))
+        mentions = await self._validate_mentions(original["conversation_type"], original["conversation_id"], content, raw_mentions)
+        message = await asyncio.to_thread(self.database.edit_message, message_id, int(session.user["id"]), content, mentions)
+        await self.emit_to_scope(message["conversation_type"], message["conversation_id"], "message.edited", {"message": message})
+        await session.send("ack", {"action": "message.edit", "message_id": message_id}, request_id=request_id)
 
     async def _history_read(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
         scope_type, scope_id = await self._resolve_scope(session, payload)
@@ -750,7 +899,21 @@ class ChatServer:
         prompt = str(payload.get("prompt", "")).strip()
         if not prompt:
             raise DatabaseError("Agent 指令不能为空")
-        self._track(asyncio.create_task(self.agent.invoke(int(session.user["id"]), scope_type, scope_id, prompt)))
+        agent_id = str(payload.get("agent_id") or AGENT_MEMBER_ID)
+        await asyncio.to_thread(
+            self.database._assert_agent_scope,
+            agent_id,
+            int(session.user["id"]),
+            scope_type,
+            scope_id,
+        )
+        self._track(
+            asyncio.create_task(
+                self.agent.invoke(
+                    int(session.user["id"]), scope_type, scope_id, prompt, agent_id
+                )
+            )
+        )
         await session.send("ack", {"action": "agent.invoke", "queued": True}, request_id=request_id)
 
     async def _agent_schedule(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
@@ -780,6 +943,390 @@ class ChatServer:
         await session.send(
             "agent.activity.list", {"activities": activities}, request_id=request_id
         )
+
+    @staticmethod
+    def _public_agent(agent: dict[str, Any]) -> dict[str, Any]:
+        result = dict(agent)
+        result.pop("avatar_path", None)
+        result.pop("owner_role", None)
+        return result
+
+    def _validate_agent_model(self, profile_id: Any) -> str | None:
+        value = str(profile_id or "").strip()
+        if not value:
+            return None
+        allowed = {item["id"] for item in self.agent.model_options()}
+        if value not in allowed:
+            raise DatabaseError("指定的模型配置不存在")
+        return value
+
+    async def _agent_list(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        agents = await asyncio.to_thread(self.database.list_agents, int(session.user["id"]))
+        await session.send(
+            "agent.list",
+            {
+                "agents": [self._public_agent(agent) for agent in agents],
+                "models": self.agent.model_options(),
+                "presets": [dict(item) for item in BUILTIN_AGENT_PRESETS],
+            },
+            request_id=request_id,
+        )
+
+    async def _agent_create(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        profile_id = self._validate_agent_model(payload.get("model_profile_id"))
+        group_id = int(payload["group_id"]) if payload.get("group_id") is not None else None
+        if group_id is not None and not await asyncio.to_thread(
+            self.database.can_manage_group, group_id, int(session.user["id"])
+        ):
+            raise DatabaseError("没有管理该群组 Agent 的权限")
+        agent = await asyncio.to_thread(
+            self.database.create_agent,
+            int(session.user["id"]),
+            name=str(payload.get("name", "")),
+            description=str(payload.get("description", "")),
+            card=payload.get("card"),
+            model_profile_id=profile_id,
+            enabled=bool(payload.get("enabled", True)),
+            memory_enabled=bool(payload.get("memory_enabled", True)),
+            auto_sticker=bool(payload.get("auto_sticker", True)),
+        )
+        group_agents: list[dict[str, Any]] | None = None
+        if group_id is not None:
+            bound = await asyncio.to_thread(
+                self.database.set_group_agent,
+                group_id,
+                agent["id"],
+                int(session.user["id"]),
+                True,
+            )
+            group_agents = [self._public_agent(item) for item in bound]
+        public = self._public_agent(agent)
+        await session.send(
+            "agent.created",
+            {
+                "agent": public,
+                "group_id": group_id,
+                "group_agents": group_agents,
+            },
+            request_id=request_id,
+        )
+        await self._broadcast_all("agent.changed", {"action": "created", "agent": public})
+        if group_id is not None and group_agents is not None:
+            await self.emit_to_scope(
+                "group",
+                str(group_id),
+                "agent.group.updated",
+                {"group_id": group_id, "agents": group_agents},
+            )
+
+    async def _agent_update(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        agent_id = str(payload.get("agent_id", ""))
+        values = {
+            key: payload[key]
+            for key in ("name", "description", "card", "enabled", "memory_enabled", "auto_sticker")
+            if key in payload
+        }
+        if "model_profile_id" in payload:
+            values["model_profile_id"] = self._validate_agent_model(payload.get("model_profile_id"))
+        agent = await asyncio.to_thread(
+            self.database.update_agent, agent_id, int(session.user["id"]), values
+        )
+        public = self._public_agent(agent)
+        await session.send("agent.updated", {"agent": public}, request_id=request_id)
+        await self._broadcast_all("agent.changed", {"action": "updated", "agent": public})
+
+    async def _agent_delete(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        agent_id = str(payload.get("agent_id", ""))
+        agent = await asyncio.to_thread(self.database.get_agent, agent_id)
+        await asyncio.to_thread(self.database.delete_agent, agent_id, int(session.user["id"]))
+        stored = agent.get("avatar_path")
+        if stored:
+            path = Path(str(stored))
+            if not path.is_absolute():
+                path = self.config.uploads_dir / path
+            root = (self.config.uploads_dir / "agent-avatars").resolve()
+            with contextlib.suppress(OSError, ValueError):
+                if path.resolve().is_relative_to(root):
+                    path.unlink(missing_ok=True)
+        await session.send("ack", {"action": "agent.delete", "agent_id": agent_id}, request_id=request_id)
+        await self._broadcast_all("agent.changed", {"action": "deleted", "agent_id": agent_id})
+
+    async def _agent_avatar_set(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        agent_id = str(payload.get("agent_id", ""))
+        await asyncio.to_thread(self.database._assert_agent_manager, agent_id, int(session.user["id"]))
+        encoded = str(payload.get("image_data", ""))
+        path: str | None = None
+        mime: str | None = None
+        if encoded:
+            mime = str(payload.get("image_mime", ""))
+            if mime not in ALLOWED_IMAGE_MIME:
+                raise DatabaseError("Agent 头像仅支持 PNG、JPEG、GIF 或 WebP")
+            raw = base64.b64decode(encoded, validate=True)
+            if not raw or len(raw) > MAX_AVATAR_SIZE:
+                raise DatabaseError("Agent 头像大小需在 1 字节至 2 MiB 之间")
+            if not _valid_avatar(raw, mime):
+                raise DatabaseError("Agent 头像文件内容与格式不匹配")
+            avatar_dir = self.config.uploads_dir / "agent-avatars"
+            avatar_dir.mkdir(parents=True, exist_ok=True)
+            self.database._secure_path(avatar_dir, 0o700)
+            safe_id = re.sub(r"[^a-zA-Z0-9_-]", "", agent_id)[:60]
+            target = avatar_dir / f"{safe_id}-{uuid.uuid4().hex}{mimetypes.guess_extension(mime) or '.img'}"
+            target.write_bytes(raw)
+            self.database._secure_path(target, 0o600)
+            path = str(target)
+        agent = await asyncio.to_thread(self.database.set_agent_avatar, agent_id, path, mime)
+        previous = agent.pop("previous_avatar_path", None)
+        if previous and previous != path:
+            previous_path = Path(str(previous))
+            if not previous_path.is_absolute():
+                previous_path = self.config.uploads_dir / previous_path
+            root = (self.config.uploads_dir / "agent-avatars").resolve()
+            with contextlib.suppress(OSError, ValueError):
+                if previous_path.resolve().is_relative_to(root):
+                    previous_path.unlink(missing_ok=True)
+        await session.send("ack", {"action": "agent.avatar.set", "agent_id": agent_id}, request_id=request_id)
+        await self._broadcast_all("agent.changed", {"action": "updated", "agent": self._public_agent(agent)})
+
+    async def _agent_avatar_get(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        agent_id = str(payload.get("agent_id", ""))
+        avatar = await asyncio.to_thread(self.database.agent_avatar_file, agent_id)
+        response: dict[str, Any] = {
+            "agent_id": agent_id,
+            "avatar_version": avatar["version"],
+            "avatar_mime": avatar["mime"],
+        }
+        path = avatar.get("resolved_path")
+        if path:
+            candidate = Path(str(path))
+            root = (self.config.uploads_dir / "agent-avatars").resolve()
+            try:
+                if not candidate.resolve().is_relative_to(root):
+                    raise DatabaseError("Agent 头像路径无效")
+                raw = candidate.read_bytes()
+                if len(raw) > MAX_AVATAR_SIZE or not _valid_avatar(raw, str(avatar["mime"])):
+                    raise DatabaseError("Agent 头像文件无效")
+                response["image_data"] = base64.b64encode(raw).decode("ascii")
+            except OSError:
+                response["load_failed"] = True
+        await session.send("agent.avatar.result", response, request_id=request_id)
+
+    async def _agent_tool_list(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        agent_id = str(payload.get("agent_id", ""))
+        tools = await asyncio.to_thread(self.database.agent_tools, agent_id)
+        await session.send(
+            "agent.tools.list", {"agent_id": agent_id, "tools": tools}, request_id=request_id
+        )
+
+    async def _agent_tool_set(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        agent_id = str(payload.get("agent_id", ""))
+        tools = await asyncio.to_thread(
+            self.database.set_agent_tools,
+            agent_id,
+            int(session.user["id"]),
+            payload.get("tools", []),
+        )
+        await session.send(
+            "agent.tools.updated", {"agent_id": agent_id, "tools": tools}, request_id=request_id
+        )
+
+    async def _agent_group_list(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        group_id = int(payload["group_id"])
+        if not await asyncio.to_thread(
+            self.database.is_group_member, group_id, int(session.user["id"])
+        ):
+            raise DatabaseError("无权查看该群 Agent")
+        agents = await asyncio.to_thread(self.database.group_agents, group_id)
+        await session.send(
+            "agent.group.list",
+            {"group_id": group_id, "agents": [self._public_agent(agent) for agent in agents]},
+            request_id=request_id,
+        )
+
+    async def _agent_group_set(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        group_id = int(payload["group_id"])
+        agent_id = str(payload.get("agent_id", ""))
+        enabled = bool(payload.get("enabled", True))
+        agents = await asyncio.to_thread(
+            self.database.set_group_agent,
+            group_id,
+            agent_id,
+            int(session.user["id"]),
+            enabled,
+        )
+        public = [self._public_agent(agent) for agent in agents]
+        await session.send(
+            "agent.group.updated",
+            {"group_id": group_id, "agents": public},
+            request_id=request_id,
+        )
+        await self.emit_to_scope(
+            "group",
+            str(group_id),
+            "agent.group.updated",
+            {"group_id": group_id, "agents": public},
+        )
+
+    async def _agent_group_tools_list(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        group_id = int(payload["group_id"])
+        if not await asyncio.to_thread(
+            self.database.can_manage_group, group_id, int(session.user["id"])
+        ):
+            raise DatabaseError("没有管理群组工具权限的权限")
+        agent_id = str(payload.get("agent_id", ""))
+        tools = await asyncio.to_thread(self.database.group_tool_states, group_id, agent_id)
+        await session.send(
+            "agent.group.tools.list",
+            {"group_id": group_id, "agent_id": agent_id, "tools": tools},
+            request_id=request_id,
+        )
+
+    async def _agent_group_tools_set(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        group_id = int(payload["group_id"])
+        agent_id = str(payload.get("agent_id", ""))
+        tools = await asyncio.to_thread(
+            self.database.set_group_tools,
+            group_id,
+            agent_id,
+            int(session.user["id"]),
+            payload.get("tools", []),
+        )
+        await session.send(
+            "agent.group.tools.updated",
+            {"group_id": group_id, "agent_id": agent_id, "tools": tools},
+            request_id=request_id,
+        )
+
+    async def _agent_group_sticker_set(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        if type(payload.get("enabled")) is not bool:
+            raise DatabaseError("enabled 必须是 boolean")
+        group_id = int(payload["group_id"])
+        agent_id = str(payload.get("agent_id", ""))
+        agents = await asyncio.to_thread(
+            self.database.set_group_auto_sticker,
+            group_id,
+            agent_id,
+            int(session.user["id"]),
+            bool(payload.get("enabled", True)),
+        )
+        public = [self._public_agent(agent) for agent in agents]
+        await session.send(
+            "agent.group.updated",
+            {"group_id": group_id, "agents": public},
+            request_id=request_id,
+        )
+        await self.emit_to_scope(
+            "group",
+            str(group_id),
+            "agent.group.updated",
+            {"group_id": group_id, "agents": public},
+        )
+
+    async def _agent_models_list(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        await session.send(
+            "agent.models.list", {"models": self.agent.model_options()}, request_id=request_id
+        )
+
+    async def _memory_scope(
+        self, session: ClientSession, payload: dict[str, Any]
+    ) -> tuple[str, str, str]:
+        scope_type, scope_id = await self._resolve_scope(session, payload)
+        agent_id = str(payload.get("agent_id") or AGENT_MEMBER_ID)
+        return agent_id, scope_type, scope_id
+
+    async def _memory_list(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        agent_id, scope_type, scope_id = await self._memory_scope(session, payload)
+        memories = await asyncio.to_thread(
+            self.database.list_memories,
+            agent_id,
+            int(session.user["id"]),
+            scope_type,
+            scope_id,
+        )
+        enabled = await asyncio.to_thread(
+            self.database.memory_effective,
+            agent_id,
+            scope_type,
+            scope_id,
+            int(session.user["id"]),
+        )
+        await session.send(
+            "memory.list",
+            {
+                "agent_id": agent_id,
+                "scope_type": scope_type,
+                "scope_id": scope_id,
+                "enabled": enabled,
+                "memories": memories,
+            },
+            request_id=request_id,
+        )
+
+    async def _memory_add(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        agent_id, scope_type, scope_id = await self._memory_scope(session, payload)
+        memory = await asyncio.to_thread(
+            self.database.save_memory,
+            agent_id,
+            int(session.user["id"]),
+            scope_type,
+            scope_id,
+            str(payload.get("content", "")),
+            kind=str(payload.get("kind", "note")),
+        )
+        await session.send("memory.saved", {"memory": memory}, request_id=request_id)
+
+    async def _memory_update(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        memory = await asyncio.to_thread(
+            self.database.update_memory,
+            int(payload["memory_id"]),
+            int(session.user["id"]),
+            content=payload.get("content"),
+            kind=payload.get("kind"),
+        )
+        await session.send("memory.updated", {"memory": memory}, request_id=request_id)
+
+    async def _memory_delete(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        memory_id = int(payload["memory_id"])
+        await asyncio.to_thread(
+            self.database.delete_memory, memory_id, int(session.user["id"])
+        )
+        await session.send("memory.deleted", {"memory_id": memory_id}, request_id=request_id)
+
+    async def _memory_settings_get(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        agent_id, scope_type, scope_id = await self._memory_scope(session, payload)
+        enabled = await asyncio.to_thread(
+            self.database.memory_setting_enabled,
+            agent_id,
+            scope_type,
+            scope_id,
+            int(session.user["id"]),
+        )
+        await session.send(
+            "memory.settings.result",
+            {
+                "agent_id": agent_id,
+                "scope_type": scope_type,
+                "scope_id": scope_id,
+                "enabled": enabled,
+            },
+            request_id=request_id,
+        )
+
+    async def _memory_settings_set(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        agent_id, scope_type, scope_id = await self._memory_scope(session, payload)
+        setting = await asyncio.to_thread(
+            self.database.set_memory_enabled,
+            agent_id,
+            int(session.user["id"]),
+            scope_type,
+            scope_id,
+            bool(payload.get("enabled", False)),
+        )
+        await session.send("memory.settings.updated", setting, request_id=request_id)
+
+    async def _tool_list(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        from .tools import tool_catalog
+
+        await session.send("tool.list", {"tools": tool_catalog()}, request_id=request_id)
 
     async def _system_status(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
         if session.user.get("role") != "admin":
@@ -825,6 +1372,8 @@ class ChatServer:
                 await session.send("group.list", {"groups": groups})
 
     async def emit_to_scope(self, scope_type: str, scope_id: str, message_type: str, payload: dict[str, Any]) -> None:
+        if message_type in {"agent.result", "tool.call.event", "agent.sticker.result"}:
+            payload = {**payload, "conversation_type": scope_type, "conversation_id": scope_id}
         recipients: set[int]
         if scope_type == "group":
             members = await asyncio.to_thread(self.database.group_members, int(scope_id))

@@ -1,4 +1,4 @@
-"""Tkinter desktop interface for the AI Agent chatroom."""
+"""Tkinter desktop interface for the Parlor chatroom."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ class ChatApplication:
 
     def __init__(self, host: str, port: int) -> None:
         self.root = tk.Tk()
-        self.root.title("AI Agent 智能聊天室")
+        self.root.title("Parlor 智能聊天室")
         self.root.geometry("1180x760")
         self.root.minsize(940, 620)
 
@@ -109,7 +109,7 @@ class ChatApplication:
         self.login_frame = ttk.Frame(self.root, padding=30)
         card = ttk.Frame(self.login_frame, padding=28)
         card.pack(expand=True)
-        ttk.Label(card, text="AI Agent 智能聊天室", style="Heading.TLabel").grid(
+        ttk.Label(card, text="Parlor 智能聊天室", style="Heading.TLabel").grid(
             row=0, column=0, columnspan=2, pady=(0, 22)
         )
         ttk.Label(card, text="用户名").grid(row=1, column=0, sticky="e", padx=8, pady=8)
@@ -136,7 +136,7 @@ class ChatApplication:
         self.main_frame = ttk.Frame(self.root, padding=8)
         top = ttk.Frame(self.main_frame)
         top.pack(fill="x", pady=(0, 7))
-        ttk.Label(top, text="AI Agent 智能聊天室", style="Heading.TLabel").pack(
+        ttk.Label(top, text="Parlor 智能聊天室", style="Heading.TLabel").pack(
             side="left"
         )
         ttk.Label(top, textvariable=self.connection_var).pack(side="left", padx=18)
@@ -997,6 +997,8 @@ class ChatApplication:
                 message_type = message.get("message_type", message.get("type", "text"))
                 if message_type == "image":
                     content = f"[图片] {message.get('image_name', '')}".strip()
+                elif message_type == "sticker":
+                    content = f"[表情包] {message.get('sticker_name', '')}".strip()
                 else:
                     content = str(message.get("content", message.get("text", "")))
                 tag = "agent" if message_type == "agent" or str(sender).lower() == "agent" else None

@@ -1,4 +1,11 @@
-# 本地 AI Agent 智能聊天室
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/kit/ai-agent-horizontal-reversed.svg">
+    <img src="docs/brand/kit/ai-agent-horizontal-color.svg" alt="Parlor" width="360">
+  </picture>
+</p>
+
+# Parlor 智能聊天室
 
 这是一个面向计算机网络课程设计的桌面聊天室。系统使用 Python 标准库实现 TCP 通信、桌面界面与 SQLite 持久化，并通过 Ollama 的 OpenAI 兼容接口接入基于 `qwen3.5:4b` 创建的本地课程模型。
 
@@ -10,8 +17,11 @@
 - 一对一私聊、动态公开群聊和默认“大厅”
 - SQLite 消息持久化、历史搜索、未读游标和离线同步
 - Unicode Emoji、图片发送、消息撤回、群内禁言
+- 多 Agent 角色卡、独立头像、模型配置、停用与群组关联
 - `@Agent` 问答、聊天摘要、待办提取、关键词搜索
-- 群聊定时总结和 Agent 工具调用审计
+- 可选长期记忆、话题检索、私聊/群聊隔离和用户删除
+- 群聊定时总结、工具权限与工具调用审计
+- 管理员本地表情包库、Agent 按语境发送 PNG/JPEG/GIF/WebP 表情包及群组频率控制
 - 本地 Ollama 不可用时，基础聊天继续工作
 
 课程验收的主链路是：三个客户端在线 → 私聊和群聊 → 客户端异常退出与重连同步 → 群内触发 Agent → 服务端读取当前会话记录 → 本地模型生成结果 → 结果回写原会话 → 界面展示工具调用记录。
@@ -77,7 +87,7 @@ Tkinter 主线程只负责界面。后台网络线程维护 Socket、自动重�
 
 ## 3. 运行环境与依赖
 
-支持 Python 3.9 或更高版本，建议使用 Python 3.11 或更高版本。
+需要 Python 3.10 或更高版本，建议使用 Python 3.11 或更高版本。
 
 服务端和旧客户端只依赖 Python 标准库。运行 V2 客户端前安装桌面依赖：
 
@@ -103,6 +113,7 @@ python -m pip install -r requirements.txt
 注意：
 
 - Ollama 是独立的本地推理服务，不是 Python 包。
+- 服务端和两个客户端没有依赖 Unix 专用模块，Windows 可按 4.3 与 6.6 运行。当前桌面验收记录来自 macOS，Windows 尚未实机验收。
 - 某些精简 Linux 发行版需要通过系统包管理器额外安装 Tk 支持（常见包名为 `python3-tk`）；这不属于 PyPI 依赖。
 - Tkinter 默认只能显示其支持的图片格式。若坚持零第三方 Python 依赖，客户端应限制格式或使用 Tk 可读取的数据；不要在文档中承诺未实现的图片解码能力。
 
@@ -129,7 +140,17 @@ ollama serve
 
 若 Ollama 已作为系统服务运行，不要重复启动 `ollama serve`。
 
-### 4.3 拉取并检查模型
+### 4.3 Windows
+
+从 [Ollama Windows 下载页](https://ollama.com/download/windows) 安装 Ollama。安装后重新打开 PowerShell，确认命令可用：
+
+```powershell
+ollama -v
+```
+
+Ollama 通常作为当前用户的后台服务运行，默认监听 `127.0.0.1:11434`，与项目默认配置一致。若 `ollama list` 提示无法连接，可在新的 PowerShell 窗口运行 `ollama serve`，或从开始菜单启动 Ollama。
+
+### 4.4 拉取并检查模型
 
 提前拉取固定模型，避免演示当天下载：
 
@@ -155,6 +176,13 @@ ollama run chatroom-qwen3.5-4b
 cp .env.example .env
 ```
 
+PowerShell 中使用：
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
+
 项目坚持标准库依赖，因此不能假设安装了 `python-dotenv`。启动实现应自行读取 `.env`，或者在 shell 中先导出变量：
 
 ```bash
@@ -162,6 +190,8 @@ set -a
 source .env
 set +a
 ```
+
+PowerShell 不需要手动导出：`python -m server` 和 `python -m client` 会自行读取项目根目录的 `.env`。需要临时覆盖时，可使用 `$env:CHAT_HOST = "0.0.0.0"`。
 
 主要配置：
 
@@ -183,12 +213,14 @@ set +a
 | `AGENT_TEMPERATURE` | `0.2` | 模型采样温度；管理面板可安全热更新 |
 | `AGENT_TIMEOUT_SECONDS` | `45` | 单次模型调用硬超时 |
 | `AGENT_MAX_CONCURRENCY` | `1` | 同时运行的模型任务数 |
+| `STICKER_AUTO_INTERVAL_SECONDS` | `90` | 同一 Agent 在同一会话发送表情包的最短间隔，最低 10 秒 |
 | `AGENT_CLOUD_FALLBACK` | `false` | 是否允许失败后转发到云端；默认禁止 |
 | `ADMIN_ENABLED` | `true` | 是否启动独立 Web 管理面板 |
 | `ADMIN_HOST` | `127.0.0.1` | 管理面板监听地址；默认只允许本机访问 |
 | `ADMIN_PORT` | `8766` | 管理面板 HTTP 端口 |
 | `ADMIN_SESSION_TTL_SECONDS` | `28800` | 管理员会话有效期 |
 | `ADMIN_COOKIE_SECURE` | `false` | 经 HTTPS 反向代理访问时必须改为 `true` |
+| `ADMIN_MAX_BODY_BYTES` | `3000000` | 管理端请求体上限，用于导入不超过 2 MiB 的本地图片 |
 
 布尔变量统一使用 `true`/`false`。相对路径以启动命令所在目录为基准，建议始终从项目根目录启动。
 
@@ -213,6 +245,8 @@ http://127.0.0.1:8766
 ```
 
 使用 `.env` 中创建的全局管理员账号登录。模型配置页内置 Ollama、OpenAI、DeepSeek、通义千问和 Gemini 预设，也支持 OpenAI Chat、Ollama Native、Gemini Native 三种协议的自定义服务。可以保存多套配置、动态获取模型列表、手动填写模型 ID、单独测试并热切换默认模型。候选配置只有模型发现和最小生成测试都成功后才会替换当前 Provider；测试失败不会影响现有模型或基础聊天。
+
+“表情包”页仅供管理员导入、分类、标注标签、停用或删除本地图片。分类和标签用于后台整理与语境匹配，不决定角色卡归属；管理员可以标记素材为“通用”，也可以只分配给指定的 Agent 角色卡。Agent 只会从“通用素材 + 自己绑定的素材”中选择已启用图片；用户也可明确要求发送表情包。自动发送可分别在 Agent 管理和群组设置中关闭，发送仍受工具权限与间隔限制。已发送媒体保留独立副本，删除库内素材不会影响聊天历史。
 
 Agent 的系统提示会获得当前供应商、模型 ID 和 API 协议等非敏感运行元数据；用户询问当前模型时由服务端直接生成准确答案。API Key、Base URL 和其他管理配置不会发送给模型。
 
@@ -265,6 +299,66 @@ CLIENT_PORT=8765
 
 不要把 Ollama 改为局域网监听。Agent 请求应始终由聊天服务端转发到本机 `127.0.0.1:11434/v1`。
 
+若服务端在 macOS、客户端在 Windows，服务端 `.env` 设置 `CHAT_HOST=0.0.0.0`，Windows 客户端设置 `CLIENT_HOST=<Mac 的局域网 IP>`。在 macOS 上确认 Wi-Fi 地址：
+
+```bash
+ipconfig getifaddr en0
+```
+
+`en0` 通常是 Wi-Fi，有线网卡可能是 `en1`；可用 `ifconfig` 查看。Windows 上先验证端口可达：
+
+```powershell
+Test-NetConnection 192.168.1.20 -Port 8765
+```
+
+macOS 首次监听时若出现防火墙提示，需要允许 Python 接受传入连接。管理面板 `8766` 继续保持 `127.0.0.1`；需要在 Windows 上查看时，用 SSH 隧道转发，不要直接把管理端口暴露到局域网。
+
+### 6.6 Windows 启动与注意事项
+
+在 PowerShell 中从项目根目录执行（将 `3.12` 换成本机已安装的 Python 版本）：
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
+python -m server
+```
+
+另开一个 PowerShell 窗口，激活同一个虚拟环境后运行：
+
+```powershell
+python -m client
+```
+
+也可以不复制 `.env`，直接用参数指定服务器：
+
+```powershell
+python -m client --host 192.168.1.20 --port 8765
+```
+
+注意事项：
+
+- 建议使用 python.org 的 64 位 Python 3.11 或 3.12。PySide6 6.7 及以上支持 Windows 10/11；使用 Python 3.13 时让 pip 选择当前可用的 6.x 最新版。
+- 若 PowerShell 阻止激活脚本，可只对当前窗口执行 `Set-ExecutionPolicy -Scope Process Bypass`。
+- 首次启动出现 Windows 防火墙提示时，仅本机演示可以取消；局域网演示需允许专用网络访问 TCP 8765。管理面板 8766 仍应保持本机访问。
+- `CHAT_DATA_DIR` 建议放在本地磁盘，避免 OneDrive 同步目录或网络盘；SQLite WAL 在这些位置可能出现锁冲突。
+- 终端中文或 Emoji 显示异常时，可在启动前执行 `$env:PYTHONUTF8 = "1"`。
+- Windows 使用 ACL 而不是 POSIX 权限位，项目不会为 `.env` 和管理端模型配置设置 `0600`；多用户机器上请自行限制项目目录访问。
+- 原生标题栏、文件对话框、字体度量和系统通知遵循 Windows 自身样式；当前仓库尚未在真实 Windows 桌面完成视觉验收。
+
+### 6.7 Windows 客户端打包（可选）
+
+课程演示直接运行源码即可，不需要打包。若希望同学不安装 Python、双击启动，可在 Windows 机器上执行：
+
+```powershell
+.\packaging\build-windows.ps1
+```
+
+脚本会创建虚拟环境、安装 PySide6 与 PyInstaller，并生成 `dist\ChatroomClient\ChatroomClient.exe`。首次运行前编辑同目录的 `.env`，把 `CLIENT_HOST` 改成服务端机器的局域网地址。打包后的客户端从 exe 同目录读取 `.env`。
+
+PyInstaller 不能从 macOS 交叉编译 Windows exe，必须在 Windows 上执行；默认生成 `onedir` 目录，启动比 `onefile` 快，也便于替换 `.env`。如果只需要 V2 客户端，不需要把服务端或 `data/` 一起打包。
+
 ## 7. 功能操作
 
 ### 7.1 注册、登录和会话
@@ -301,9 +395,13 @@ CLIENT_PORT=8765
 @Agent 我们刚才决定使用什么数据库？
 ```
 
-服务端先验证用户对当前会话的访问权限，再执行读取或搜索工具，将授权范围内且未撤回的消息交给模型。结果作为 Agent 消息写回原会话。
+默认 AI Agent 会兼容旧用法。客户端“设置 → AI 助手”管理 Agent 角色库，可新建、编辑、停用或删除 Agent，并配置名称、头像、简介、角色卡、模型配置和工具权限。管理员也可在服务端后台“预设角色卡”页创建和编辑全局角色卡；保存后会自动同步到表情包页的“适用角色卡”选择列表。群聊中打开“群设置 → 群内 AI Agent”即可添加或移出角色、进入共享记忆；永雏塔菲、久留美和千早爱音作为非官方同人风格预设角色开箱可用。触发方式为 @Agent名称。
 
-工具审计面板应显示工具名、调用者、授权会话、状态、读取条数和耗时。Agent 不能读取其他群、其他私聊、文件系统或数据库任意表。
+服务端先验证用户对当前会话的访问权限，再检查 Agent 是否启用、是否加入当前群组、Agent 级与群组级工具授权是否允许，最后执行读取或搜索工具。角色卡只影响表达与领域背景，不能改变这些检查。结果作为对应 Agent 消息写回原会话。
+
+长期记忆默认关闭。私聊记忆只对开启它的本人可见；群聊记忆由群主或管理员开启，并在群内共享。记忆可以按当前话题检索，也可以查看、编辑、删除或关闭。Agent 的上下文会增加较早对话摘要，避免历史无限增长。
+
+工具审计面板显示工具名、Agent、执行模式、调用者、授权会话、状态、读取条数和耗时。Agent 不能读取其他群、其他私聊、文件系统或数据库任意表。
 
 群主或管理员可以为群设置 1–1440 分钟的定时总结。没有新消息时不应生成空摘要；只有完整总结成功后才能推进总结游标。
 

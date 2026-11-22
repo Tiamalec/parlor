@@ -26,6 +26,8 @@
         <button data-page="dashboard" class="active">概览</button>
         <button data-page="models">模型配置</button>
         <button data-page="agents">Agent 管理</button>
+        <button data-page="roles">预设角色卡</button>
+        <button data-page="stickers">表情包</button>
         <button data-page="logs">运行日志</button>
         <button data-page="directory">基础管理</button>
         <button data-page="audit">管理审计</button>
@@ -75,11 +77,57 @@
 
       <section id="page-agents" class="page hidden">
         <article class="card toolbar"><div><h2>Agent 运行开关</h2><p id="agent-switch-state" class="muted"></p></div><button id="agent-toggle"></button></article>
-        <article class="card"><h2>最近运行</h2><div class="table-wrap"><table><thead><tr><th>ID</th><th>任务</th><th>发起者</th><th>状态</th><th>开始时间</th><th>错误</th></tr></thead><tbody id="runs-body"></tbody></table></div></article>
-        <article class="card"><h2>工具调用</h2><div class="table-wrap"><table><thead><tr><th>工具</th><th>调用者</th><th>会话</th><th>状态</th><th>结果</th></tr></thead><tbody id="tools-body"></tbody></table></div></article>
+        <article class="card"><h2>最近运行</h2><div class="table-wrap"><table><thead><tr><th>ID</th><th>Agent</th><th>任务</th><th>发起者</th><th>状态</th><th>开始时间</th><th>错误</th></tr></thead><tbody id="runs-body"></tbody></table></div></article>
+        <article class="card"><h2>工具调用</h2><div class="table-wrap"><table><thead><tr><th>工具</th><th>Agent</th><th>模式</th><th>调用者</th><th>会话</th><th>状态</th><th>结果</th></tr></thead><tbody id="tools-body"></tbody></table></div></article>
+      </section>
+
+      <section id="page-roles" class="page hidden">
+        <div class="model-workspace">
+          <article class="card model-sidebar">
+            <div class="toolbar"><div><h2>角色卡列表</h2><p class="muted compact">预设角色卡可加入群组并被表情包绑定。</p></div><button id="new-role-card" type="button">新建</button></div>
+            <div id="role-card-list" class="profile-list"></div>
+          </article>
+          <article class="card model-editor">
+            <div class="toolbar"><div><h2 id="role-card-editor-title">新建预设角色卡</h2><p class="muted compact">保存后会自动出现在表情包页的“适用角色卡”中。</p></div><span id="role-card-status" class="pill">预设</span></div>
+            <form id="role-card-form" class="form-grid">
+              <input name="id" type="hidden">
+              <label>名称<input name="name" maxlength="30" required></label>
+              <label class="wide">简介<textarea name="description" rows="2" maxlength="300"></textarea></label>
+              <label class="wide">性格<textarea name="personality" rows="3" maxlength="600"></textarea></label>
+              <label class="wide">背景<textarea name="background" rows="4" maxlength="1200"></textarea></label>
+              <label class="wide">语言风格<textarea name="language_style" rows="3" maxlength="600"></textarea></label>
+              <label class="wide">行为规则<textarea name="behavior_rules" rows="4" maxlength="1600"></textarea></label>
+              <label class="check-row"><input name="enabled" type="checkbox" checked>启用角色卡</label>
+              <label class="check-row"><input name="memory_enabled" type="checkbox" checked>允许长期记忆</label>
+              <label class="check-row"><input name="auto_sticker" type="checkbox" checked>允许自动发送表情包</label>
+              <div class="wide model-actions"><button type="submit">保存角色卡</button><button id="delete-role-card" class="danger" type="button">删除</button></div>
+            </form>
+          </article>
+        </div>
       </section>
 
       <section id="page-logs" class="page hidden"><article class="card"><div class="toolbar"><h2>运行日志</h2><button id="refresh-logs" class="secondary">刷新</button></div><pre id="logs-output"></pre></article></section>
+
+      <section id="page-stickers" class="page hidden">
+        <article class="card"><h2>本地表情包库</h2><p class="muted">仅管理员可导入和管理；支持 PNG、JPEG、GIF、WebP，单文件不超过 2 MiB。历史消息会保留已发送的媒体副本。</p>
+          <form id="sticker-form" class="form-grid">
+            <input name="id" type="hidden">
+            <label>名称<input name="name" maxlength="40" required></label>
+            <label>分类（整理用）<input name="category" maxlength="24" value="通用"><small>用于后台归类和检索，不决定角色卡归属。</small></label>
+            <label class="wide">标签（逗号分隔）<input name="tags" placeholder="开心, 鼓励"></label>
+            <div class="wide sticker-scope">
+              <strong>适用角色卡</strong>
+              <label class="check-row"><input name="shared" type="checkbox" checked>通用：所有角色卡都可以使用</label>
+              <p class="muted compact">取消通用后，只有下方勾选的角色卡会使用这张表情包。</p>
+              <div id="sticker-agent-options" class="check-grid"></div>
+            </div>
+            <label class="wide">本地图片<input name="file" type="file" accept="image/png,image/jpeg,image/gif,image/webp"></label>
+            <label class="check-row wide"><input name="enabled" type="checkbox" checked>可供 Agent 使用</label>
+            <div class="wide model-actions"><button type="submit">保存表情包</button><button id="sticker-new" class="secondary" type="button">清空表单</button></div>
+          </form>
+        </article>
+        <article class="card"><div class="toolbar"><h2>已导入</h2><div class="toolbar-actions"><select id="sticker-filter"><option value="">全部角色卡</option><option value="__shared">仅通用</option></select><button id="refresh-stickers" class="secondary" type="button">刷新</button></div></div><div id="sticker-list" class="list"></div></article>
+      </section>
 
       <section id="page-directory" class="page hidden">
         <div class="grid two">

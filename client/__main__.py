@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
+
+
+def _config_path() -> Path:
+    """Read .env from the working directory, or beside a packaged executable."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / ".env"
+    return Path.cwd() / ".env"
+
 
 def _load_dotenv(path: Path) -> None:
     if not path.exists():
         return
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -18,8 +27,8 @@ def _load_dotenv(path: Path) -> None:
 
 
 def main() -> None:
-    _load_dotenv(Path.cwd() / ".env")
-    parser = argparse.ArgumentParser(description="AI Agent chatroom desktop client")
+    _load_dotenv(_config_path())
+    parser = argparse.ArgumentParser(description="Parlor chatroom desktop client")
     parser.add_argument(
         "--host", default=os.environ.get("CLIENT_HOST", "127.0.0.1")
     )

@@ -198,6 +198,7 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QFrame#ProfileCard {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 12px; }}
     QFrame#ProfilePane {{ background: transparent; border: none; }}
     QFrame#ProfilePopover {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: 12px; }}
+    QScrollArea#ProfileCardScroll, QWidget#ProfileCardViewport {{ background: transparent; border: none; }}
     QFrame#TaskRow {{ background: transparent; border: none; border-bottom: 1px solid {c.border}; border-radius: 0; }}
     QFrame#TaskRow:hover {{ background: {c.surface_subtle}; }}
     QFrame#SettingsSection {{ background: transparent; border: none; border-bottom: 1px solid {c.border}; }}
@@ -214,7 +215,27 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QLabel#MetricValue {{ font-size: 26px; font-weight: 700; }}
     QLabel#EmptyStateIcon {{ font-size: 42px; }}
     QLabel#EmptyStateTitle {{ font-size: 18px; font-weight: 700; }}
-    QLabel#AuthBrandMark {{ font-size: 34px; color: {c.primary}; font-weight: 700; }}
+    QLabel#AuthBrandTile {{ background: {c.primary_subtle}; border: 1px solid {c.border}; border-radius: 12px; }}
+    QLabel#AuthWordmark {{ font-size: 16px; font-weight: 700; }}
+    QLabel#AuthWordmarkMeta {{ color: {c.text_tertiary}; font-size: 12px; }}
+    QLabel#AuthHeroTitle {{ font-size: 24px; font-weight: 700; }}
+    QLabel#AuthHeroText {{ color: {c.text_secondary}; font-size: 14px; }}
+    QLabel#AuthFeatureText {{ color: {c.text_secondary}; }}
+    QLabel#AuthHeading {{ font-size: 20px; font-weight: 700; }}
+    QFrame#AuthModeTrack {{ background: {c.surface_subtle}; border: 1px solid {c.border}; border-radius: 8px; }}
+    QPushButton#AuthModeTab {{ min-height: 30px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: {c.text_secondary}; }}
+    QPushButton#AuthModeTab:hover {{ color: {c.text_primary}; background: {c.surface}; }}
+    QPushButton#AuthModeTab:checked {{ background: {c.surface_elevated}; border-color: {c.border_strong}; color: {c.primary}; font-weight: 600; }}
+    QPushButton#AuthModeTab:focus {{ border: 2px solid {c.primary}; }}
+    QPushButton#AuthModeTab:disabled {{ color: {c.text_disabled}; }}
+    QLabel#AuthFieldLabel {{ color: {c.text_secondary}; font-size: 12px; font-weight: 600; }}
+    QLineEdit#AuthInput {{ min-height: 22px; padding: 9px 10px; }}
+    QLabel#AuthStatusDot {{ min-width: 8px; max-width: 8px; min-height: 8px; max-height: 8px; border-radius: 4px; background: {c.text_disabled}; }}
+    QLabel#AuthStatusDot[connectionState="online"] {{ background: {c.success}; }}
+    QLabel#AuthStatusDot[connectionState="pending"] {{ background: {c.warning}; }}
+    QLabel#AuthStatusDot[connectionState="offline"] {{ background: {c.danger}; }}
+    QLabel#AuthStatusText {{ color: {c.text_secondary}; font-size: 12px; }}
+    QLabel#AuthServer {{ color: {c.text_tertiary}; font-size: 11px; }}
     QLabel#NavBadge {{ color: {c.surface}; background: {c.danger}; border: none; border-radius: 7px; min-width: 14px; min-height: 14px; padding: 0 3px; font-size: 9px; font-weight: 700; }}
     QLabel#TaskTitle {{ font-weight: 600; }}
     QLabel#TaskStatus {{ color: {c.text_secondary}; background: {c.surface_subtle}; border-radius: 6px; padding: 4px 8px; font-size: 12px; }}
@@ -225,6 +246,7 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QLabel#InlineNotice[noticeKind="success"] {{ color: {c.success}; }}
     QLabel#InlineNotice[noticeKind="error"] {{ color: {c.danger}; }}
     QLabel#Muted, QLabel#MessageTime {{ color: {c.text_tertiary}; }}
+    QLabel#DraftPreview {{ color: {c.text_secondary}; font-weight: 600; }}
     QLabel#MessageTime {{ font-size: 11px; }}
     QLabel#DirectoryStatus {{ color: {c.text_secondary}; background: {c.surface_subtle}; border-radius: 6px; padding: 6px 8px; }}
     QLabel#RecalledMessage {{ color: {c.text_tertiary}; font-style: italic; }}
@@ -236,16 +258,35 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QLabel#RoleBadge {{ color: {c.text_secondary}; background: {c.surface_subtle}; border-radius: 8px; padding: 3px 7px; font-size: 12px; }}
     QLabel#AgentBadge {{ color: {c.agent}; background: {c.agent_subtle}; border-radius: 8px; padding: 3px 7px; font-size: 12px; font-weight: 600; }}
     QLabel#AgentBadge[online="false"] {{ color: {c.text_secondary}; background: {c.surface_subtle}; }}
-    QLabel#PlannedBadge {{ color: {c.warning}; background: {c.surface_subtle}; border-radius: 8px; padding: 3px 7px; font-size: 12px; font-weight: 600; }}
     QLabel#MessageSender {{ color: {c.text_secondary}; font-size: 12px; font-weight: 600; }}
     QLabel#AgentMessageSender {{ color: {c.agent}; font-size: 12px; font-weight: 600; }}
+    QLabel#AgentActivity {{ color: {c.text_secondary}; padding: 3px 5px; }}
+    QLabel#SystemMessage {{ color: {c.text_tertiary}; background: {c.surface_subtle}; border-radius: 8px; padding: 6px 12px; }}
     QFrame#MessageBubble {{ border: 1px solid {c.border}; border-radius: 10px; }}
     QFrame#MessageBubble[messageRole="incoming"] {{ background: {c.message_incoming}; }}
     QFrame#MessageBubble[messageRole="outgoing"] {{ background: {c.message_outgoing}; }}
     QFrame#MessageBubble[messageRole="agent"] {{ background: {c.message_agent}; border-color: {c.message_agent_border}; }}
+    QFrame#MessageBubble[messageRole="card"] {{ background: transparent; border: none; }}
+    QFrame#MessageBubble[messageType="sticker"] {{ background: transparent; border: none; border-radius: 0; }}
     QFrame#MessageBubble QLabel#AgentMarkdownContent, QFrame#MessageBubble QLabel#MarkdownMessageContent,
     QFrame#MessageBubble QLabel#PlainMessageContent {{ color: {c.text_primary}; font-size: 14px; font-weight: 400; }}
     QLabel#MessageImage {{ color: {c.text_secondary}; background: {c.surface_subtle}; border-radius: 8px; padding: 8px; }}
+    QLabel#MessageSticker {{ color: {c.text_secondary}; background: transparent; border: none; padding: 0; }}
+    QFrame#AgentCard {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 12px; }}
+    QFrame#AgentCard QWidget#AgentCardBody, QFrame#AgentCard QWidget#AgentCardFooter {{ background: transparent; border: none; }}
+    QFrame#CardDivider {{ border: none; border-top: 1px solid {c.border}; max-height: 1px; }}
+    QLabel#CardTitle {{ font-size: 15px; font-weight: 600; color: {c.text_primary}; }}
+    QLabel#CardBadge {{ color: {c.agent}; background: {c.agent_subtle}; border-radius: 8px; padding: 2px 6px; font-size: 11px; font-weight: 600; }}
+    QLabel#CardMeta {{ color: {c.text_tertiary}; font-size: 11px; }}
+    QLabel#CardBody {{ color: {c.text_primary}; font-size: 13px; }}
+    QLabel#CardSectionTitle {{ color: {c.text_secondary}; font-size: 13px; font-weight: 500; }}
+    QLabel#SummaryPoint, QLabel#CardPendingPoint {{ color: {c.text_primary}; font-size: 13px; }}
+    QLabel#CardPendingPoint {{ color: {c.text_secondary}; }}
+    QLabel#CardBulletMark {{ color: {c.agent}; font-size: 13px; font-weight: 600; }}
+    QLabel#CardEmpty {{ color: {c.text_secondary}; font-size: 12px; }}
+    QFrame#CardTaskRow {{ background: transparent; border: none; border-bottom: 1px solid {c.border}; border-radius: 0; }}
+    QLabel#CardTaskTitle {{ color: {c.text_primary}; font-size: 13px; font-weight: 600; }}
+    QLabel#CardTaskMeta {{ color: {c.text_tertiary}; font-size: 11px; }}
     QPushButton {{ min-height: 34px; padding: 0 14px; border: 1px solid {c.border}; border-radius: 8px; background: {c.surface}; color: {c.text_primary}; }}
     QPushButton:hover {{ background: {c.surface_subtle}; border-color: {c.border_strong}; }}
     QPushButton:pressed {{ background: {c.primary_subtle}; }}
@@ -254,8 +295,21 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QPushButton#Primary {{ color: {c.surface}; background: {c.primary}; border-color: {c.primary}; font-weight: 600; }}
     QPushButton#Primary:hover {{ background: {c.primary_hover}; }}
     QPushButton#Primary:pressed {{ background: {c.primary_pressed}; }}
+    QPushButton#Primary:disabled {{ color: {c.text_disabled}; background: {c.surface_subtle}; border-color: {c.border}; }}
     QPushButton#Ghost {{ border: none; background: transparent; }}
     QPushButton#Ghost:hover {{ background: {c.primary_subtle}; }}
+    QPushButton#CardAction {{ min-height: 24px; padding: 0 6px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: {c.text_secondary}; font-size: 12px; }}
+    QPushButton#CardAction:hover {{ background: {c.surface_subtle}; color: {c.text_primary}; }}
+    QPushButton#CardAction:pressed {{ background: {c.primary_subtle}; }}
+    QPushButton#CardAction:focus {{ border: 1px solid {c.primary}; }}
+    QPushButton#CardAction:disabled {{ color: {c.text_disabled}; }}
+    QPushButton#QuotedMessage {{ min-height: 28px; padding: 4px 8px; border: 1px solid {c.border}; border-radius: 8px; background: {c.surface_subtle}; color: {c.text_secondary}; text-align: left; }}
+    QPushButton#QuotedMessage:hover {{ background: {c.primary_subtle}; color: {c.text_primary}; }}
+    QPushButton#NewMessagesBadge {{ min-height: 22px; padding: 3px 11px; border: 1px solid {c.primary}; border-radius: 13px; background: {c.primary}; color: {c.surface}; font-size: 12px; font-weight: 600; }}
+    QPushButton#NewMessagesBadge:hover {{ background: {c.primary_hover}; border-color: {c.primary_hover}; }}
+    QPushButton#NewMessagesBadge:pressed {{ background: {c.primary_pressed}; border-color: {c.primary_pressed}; }}
+    QPushButton#NewMessagesBadge:focus {{ border: 2px solid {c.surface}; }}
+    QPushButton#QuotedMessage:focus {{ border: 2px solid {c.primary}; }}
     QPushButton#ComposerTool {{ min-height: 30px; padding: 0 10px; border: none; background: transparent; color: {c.text_secondary}; }}
     QPushButton#ComposerTool:hover {{ color: {c.text_primary}; background: {c.surface_subtle}; }}
     QPushButton#SegmentedTab {{ min-height: 32px; border: none; background: transparent; color: {c.text_secondary}; }}
@@ -276,6 +330,7 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QTextEdit#ComposerInput:focus {{ background: {c.surface}; border: 2px solid {c.primary}; }}
     QListWidget, QTreeWidget, QTableWidget {{ color: {c.text_primary}; background: transparent; border: none; outline: none; alternate-background-color: {c.surface_subtle}; }}
     QListWidget#MentionCandidates, QListWidget#SearchResults {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: 8px; }}
+    QListWidget#StickerGrid {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 8px; }}
     QListWidget::item, QTreeWidget::item {{ padding: 8px; border-radius: 8px; }}
     QListWidget#DirectoryList::item {{ min-height: 40px; padding: 6px 8px; }}
     QListWidget#SettingsNav::item {{ min-height: 32px; padding: 6px 10px; }}
@@ -293,7 +348,8 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
     QDialog, QMessageBox {{ background: {c.surface_elevated}; color: {c.text_primary}; }}
     QToolTip {{ background: {c.surface_elevated}; color: {c.text_primary}; border: 1px solid {c.border_strong}; padding: 6px; }}
-    QMenu {{ background: {c.surface_elevated}; color: {c.text_primary}; border: 1px solid {c.border_strong}; padding: 6px; }}
+    QMenu {{ background: {c.surface_elevated}; color: {c.text_primary}; border: 1px solid {c.border_strong}; border-radius: 10px; padding: 6px; }}
+    QMenu#MessageActionsMenu {{ border-radius: 10px; }}
     QMenu::item {{ padding: 8px 20px; border-radius: 6px; }}
     QMenu::item:selected {{ background: {c.primary_subtle}; }}
     QMenu::item:disabled {{ color: {c.text_disabled}; }}

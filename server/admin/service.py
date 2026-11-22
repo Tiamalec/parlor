@@ -1,20 +1,28 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import re
 import secrets
 import time
+import uuid
 from collections import deque
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 from server.agent import AgentService
-from server.database import Database
+from server.agent_config import BUILTIN_AGENT_IDS, DEFAULT_AGENT_ID
+from server.database import Database, DatabaseError
 from server.model_provider import AgentUnavailable, ProviderSettings, create_provider, normalize_protocol
 from server.provider_presets import PROVIDER_PRESETS
+from server.stickers import (
+    normalize_sticker_agent_ids, normalize_sticker_category, normalize_sticker_name,
+    normalize_sticker_tags, validate_sticker_image,
+)
 
 from .auth import AdminAuthError, AdminSession, AdminSessionStore
 from .config_store import ModelProfile, ProviderConfigState, ProviderConfigStore
@@ -99,6 +107,9 @@ class AdminService:
         )
         active = self._provider_state.active()
         self.agent.apply_provider(active.settings, active.api_key, self._provider_label(active))
+        self.agent.set_model_catalog(
+            list(self._provider_state.profiles), self._provider_state.default_profile_id
+        )
         self.agent.set_enabled(self._provider_state.agent_enabled)
 
     def close(self) -> None:
@@ -248,6 +259,7 @@ class AdminService:
     async def _persist_state(self, state: ProviderConfigState) -> None:
         await asyncio.to_thread(self.config_store.save_state, state)
         self._provider_state = state
+        self.agent.set_model_catalog(list(state.profiles), state.default_profile_id)
 
     async def _commit_active_profile(
         self, state: ProviderConfigState, profile: ModelProfile
@@ -443,6 +455,185 @@ class AdminService:
     async def groups(self) -> list[dict[str, Any]]:
         return await asyncio.to_thread(self.database.list_groups_admin)
 
+    async def stickers(self) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self.database.list_stickers)
+
+    async def agent_cards(self, session: AdminSession) -> list[dict[str, Any]]:
+        rows = await self.role_cards(session)
+        return [
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "description": row["description"],
+                "enabled": row["enabled"],
+                "builtin": row["builtin"],
+            }
+            for row in rows
+        ]
+
+    async def role_cards(self, session: AdminSession) -> list[dict[str, Any]]:
+        rows = await asyncio.to_thread(self.database.list_agents, session.user_id)
+        return [self._role_card_view(row) for row in rows]
+
+    @staticmethod
+    def _role_card_view(row: dict[str, Any]) -> dict[str, Any]:
+        agent_id = str(row["id"])
+        return {
+            "id": agent_id,
+            "name": str(row.get("name") or agent_id),
+            "description": str(row.get("description") or ""),
+            "card": row.get("card") if isinstance(row.get("card"), dict) else {},
+            "enabled": bool(row.get("enabled", True)),
+            "memory_enabled": bool(row.get("memory_enabled", True)),
+            "auto_sticker": bool(row.get("auto_sticker", True)),
+            "builtin": bool(row.get("builtin")),
+            "preset": row.get("owner_id") is None,
+            "deletable": agent_id not in BUILTIN_AGENT_IDS and agent_id != DEFAULT_AGENT_ID,
+        }
+
+    async def save_role_card(
+        self, session: AdminSession, payload: dict[str, Any], agent_id: str | None = None
+    ) -> dict[str, Any]:
+        allowed = {
+            "name", "description", "card", "enabled", "memory_enabled", "auto_sticker",
+        }
+        if set(payload) - allowed:
+            raise AdminRequestError("角色卡请求包含未知字段")
+        for field in ("enabled", "memory_enabled", "auto_sticker"):
+            if field in payload and type(payload[field]) is not bool:
+                raise AdminRequestError(f"{field} 必须是 boolean")
+        try:
+            if agent_id:
+                values = {key: payload[key] for key in allowed if key in payload}
+                if not values:
+                    result = await asyncio.to_thread(self.database.get_agent, agent_id)
+                else:
+                    result = await asyncio.to_thread(
+                        self.database.update_agent, agent_id, session.user_id, values
+                    )
+                action = "role-card.update"
+            else:
+                result = await asyncio.to_thread(
+                    self.database.create_agent,
+                    None,
+                    name=payload.get("name"),
+                    description=payload.get("description", ""),
+                    card=payload.get("card") or {},
+                    enabled=payload.get("enabled", True),
+                    memory_enabled=payload.get("memory_enabled", True),
+                    auto_sticker=payload.get("auto_sticker", True),
+                    preset=True,
+                )
+                action = "role-card.create"
+        except (DatabaseError, ValueError) as exc:
+            raise AdminRequestError(str(exc)) from exc
+        view = self._role_card_view(result)
+        await self._audit(
+            session, action, view["id"], view["name"], "succeeded"
+        )
+        return view
+
+    async def delete_role_card(self, session: AdminSession, agent_id: str) -> dict[str, Any]:
+        try:
+            await asyncio.to_thread(
+                self.database.delete_agent, agent_id, session.user_id
+            )
+        except (DatabaseError, ValueError) as exc:
+            raise AdminRequestError(str(exc)) from exc
+        await self._audit(session, "role-card.delete", agent_id, "deleted", "succeeded")
+        return {"ok": True}
+
+    async def sticker_media(self, sticker_id: str) -> tuple[bytes, str]:
+        sticker = await asyncio.to_thread(self.database.sticker_file, sticker_id)
+        path = Path(sticker["resolved_path"]).resolve()
+        library = (self.database.uploads_dir / "stickers").resolve()
+        if not path.is_relative_to(library):
+            raise AdminRequestError("表情包路径无效")
+        try:
+            return await asyncio.to_thread(path.read_bytes), str(sticker["mime"])
+        except OSError as exc:
+            raise AdminRequestError("表情包文件不存在") from exc
+
+    async def save_sticker(
+        self, session: AdminSession, payload: dict[str, Any], sticker_id: str | None = None
+    ) -> dict[str, Any]:
+        allowed = {
+            "name", "category", "tags", "enabled", "mime", "image_data", "shared",
+            "agent_ids",
+        }
+        if set(payload) - allowed:
+            raise AdminRequestError("表情包请求包含未知字段")
+        if "enabled" in payload and type(payload["enabled"]) is not bool:
+            raise AdminRequestError("enabled 必须是 boolean")
+        if "shared" in payload and type(payload["shared"]) is not bool:
+            raise AdminRequestError("shared 必须是 boolean")
+        old = await asyncio.to_thread(self.database.get_sticker, sticker_id) if sticker_id else None
+        values: dict[str, Any] = {}
+        if "name" in payload or not old:
+            values["name"] = normalize_sticker_name(payload.get("name"))
+        if "category" in payload or not old:
+            values["category"] = normalize_sticker_category(payload.get("category"))
+        if "tags" in payload or not old:
+            values["tags"] = normalize_sticker_tags(payload.get("tags"))
+        if "enabled" in payload:
+            values["enabled"] = payload["enabled"]
+        shared = payload.get("shared", bool(old["shared"]) if old else True)
+        if "agent_ids" in payload:
+            agent_ids = normalize_sticker_agent_ids(payload.get("agent_ids"))
+        else:
+            agent_ids = list(old.get("agent_ids") or []) if old else []
+        if not shared and not agent_ids:
+            raise AdminRequestError("指定角色卡范围时至少选择一个角色卡")
+        if "shared" in payload:
+            values["shared"] = shared
+        if "agent_ids" in payload or not old:
+            values["agent_ids"] = agent_ids
+        path: Path | None = None
+        if "image_data" in payload:
+            mime = str(payload.get("mime") or (old or {}).get("mime") or "")
+            try:
+                raw = base64.b64decode(str(payload["image_data"]), validate=True)
+            except (ValueError, base64.binascii.Error) as exc:
+                raise AdminRequestError("图片数据不是有效 Base64") from exc
+            validate_sticker_image(raw, mime)
+            extension = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp"}[mime]
+            library = self.database.uploads_dir / "stickers"
+            library.mkdir(parents=True, exist_ok=True)
+            path = library / f"{uuid.uuid4().hex}{extension}"
+            await asyncio.to_thread(path.write_bytes, raw)
+            values.update(path=f"stickers/{path.name}", mime=mime, animated=mime == "image/gif")
+        elif not old:
+            raise AdminRequestError("请选择本地图片文件")
+        elif "mime" in payload:
+            raise AdminRequestError("更新图片格式时必须同时上传文件")
+        try:
+            if old:
+                result = await asyncio.to_thread(self.database.update_sticker, str(sticker_id), values)
+            else:
+                result = await asyncio.to_thread(self.database.create_sticker, **values)
+        except DatabaseError as exc:
+            if path:
+                path.unlink(missing_ok=True)
+            raise AdminRequestError(str(exc)) from exc
+        except Exception:
+            if path:
+                path.unlink(missing_ok=True)
+            raise
+        if old and path:
+            old_path = (self.database.uploads_dir / str(old["path"])).resolve()
+            if old_path.is_relative_to((self.database.uploads_dir / "stickers").resolve()):
+                old_path.unlink(missing_ok=True)
+        await self._audit(session, "sticker.update" if old else "sticker.import", str(result["id"]), str(result["name"]), "succeeded")
+        return result
+
+    async def delete_sticker(self, session: AdminSession, sticker_id: str) -> dict[str, Any]:
+        path_value = await asyncio.to_thread(self.database.delete_sticker, sticker_id)
+        path = (self.database.uploads_dir / path_value).resolve()
+        if path.is_relative_to((self.database.uploads_dir / "stickers").resolve()):
+            path.unlink(missing_ok=True)
+        await self._audit(session, "sticker.delete", sticker_id, "deleted", "succeeded")
+        return {"ok": True}
+
     async def audit(self, limit: int = 100) -> list[dict[str, Any]]:
         return await asyncio.to_thread(self.database.list_admin_audit, limit)
 
@@ -468,6 +659,8 @@ class AdminService:
     def _safe_run(row: dict[str, Any]) -> dict[str, Any]:
         allowed = {
             "id",
+            "agent_id",
+            "agent_name",
             "task_type",
             "conversation_type",
             "conversation_id",
@@ -489,12 +682,15 @@ class AdminService:
         allowed = {
             "id",
             "run_id",
+            "agent_id",
+            "agent_name",
             "tool_name",
             "conversation_type",
             "conversation_id",
             "requested_by",
             "requested_by_name",
             "input_summary",
+            "tool_mode",
             "result_count",
             "status",
             "started_at",

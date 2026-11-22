@@ -5,5 +5,16 @@
     <file alias="bot.svg">lucide/bot.svg</file>
     <file alias="shield.svg">lucide/shield.svg</file>
     <file alias="settings-2.svg">lucide/settings-2.svg</file>
+    <file alias="arrow-down.svg">lucide/arrow-down.svg</file>
+    <file alias="file-text.svg">lucide/file-text.svg</file>
+    <file alias="list-todo.svg">lucide/list-todo.svg</file>
+    <file alias="sparkles.svg">lucide/sparkles.svg</file>
+    <file alias="user-round.svg">lucide/user-round.svg</file>
+    <file alias="lock.svg">lucide/lock.svg</file>
+    <file alias="eye.svg">lucide/eye.svg</file>
+    <file alias="eye-off.svg">lucide/eye-off.svg</file>
+    <file alias="brand-logo-light.svg">brand/logo-light.svg</file>
+    <file alias="brand-logo-dark.svg">brand/logo-dark.svg</file>
+    <file alias="brand-app-icon.svg">brand/app-icon.svg</file>
   </qresource>
 </RCC>

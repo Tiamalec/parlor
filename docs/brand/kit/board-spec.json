@@ -1,0 +1,38 @@
+{
+  "brand": "Parlor",
+  "tagline": "本地 AI Agent 智能聊天室",
+  "brief": "一个本地优先的桌面聊天室：人类与多个 AI Agent 在同一个房间里私聊、群聊、协作。技术语境是 Python、TCP Socket、SQLite 与本地 Ollama；Agent 通过服务端工具执行真实任务。",
+  "adjectives": ["安静", "现代", "可靠", "连接", "本地优先"],
+  "criteria": "16px 可辨；单色成立；深底反白成立；与现有主操作蓝和 Agent 紫兼容；不依赖渐变、阴影或效果。",
+  "industry": "software",
+  "nav": ["消息", "通讯", "AI 任务", "设置"],
+  "brand_color": "#6B4FD3",
+  "greyscale": false,
+  "final": true,
+  "round": 3,
+  "designer": "Codex × logo-design",
+  "concepts": [
+    {
+      "name": "Agent in the Room",
+      "symbol": "ai-agent-symbol-color.svg",
+      "lockup": "ai-agent-horizontal-color.svg",
+      "stacked": "ai-agent-stacked-color.svg",
+      "avatar": "dist/ai-agent-square.svg",
+      "symbol_on_tile": "dist/ai-agent-app-icon.svg",
+      "lockup_on_dark": "ai-agent-horizontal-reversed.svg",
+      "stacked_on_dark": "ai-agent-stacked-reversed.svg",
+      "idea": "一间房，一个 Agent 席位：房间里有人，也有 AI。",
+      "rationale": [
+        "房间是共享空间，实心席位是 Agent 成员，而不是另一个聊天功能。",
+        "16px 仍能读成房间 + 成员；favicon 与 App 图标使用简化裁切。",
+        "Ink 房间 + Agent 紫席位，和产品的蓝色主操作、紫色 Agent 语义一致。"
+      ]
+    }
+  ],
+  "recommendation": "Agent in the Room — 它把产品差异讲成一句话：不是多了一个 AI 功能，而是房间里多了一个 Agent 成员。16px、单色和反白都成立。",
+  "next_steps": [
+    "交付 SVG/PNG 与 favicon、App 图标、web icon 全套",
+    "接入登录页 46px 品牌块、窗口/托盘图标与 README 头像",
+    "正式商用前完成商标与近似标志检索"
+  ]
+}

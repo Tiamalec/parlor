@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1600" height="984" viewBox="0 0 1600 984"><defs><filter id="grey"><feColorMatrix type="saturate" values="0"/></filter></defs><rect width="1600" height="984" fill="#f7f7f4"/><text x="60" y="78" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="40" font-weight="700" fill="#161616">AI Agent 智能聊天室 — Logo 概念</text><text x="60" y="116" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="20" fill="#6b6b6b">第一轮：黑白概念，先定方向</text><rect x="60" y="150" width="474.667" height="774" rx="18" fill="#fff" stroke="#e4e4e0" stroke-width="1"/><g filter="url(#grey)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" x="90" y="190" width="414.667" height="300" preserveAspectRatio="xMidYMid meet">
+<g fill="none" stroke="#111111" stroke-width="30" stroke-linecap="round" stroke-linejoin="round">
+<path d="M 128 50 L 58 208"/>
+<path d="M 128 50 L 198 208"/>
+<path d="M 82 156 L 174 156"/>
+</g>
+</svg>
+</g><g filter="url(#grey)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 256" x="90" y="514" width="414.667" height="120" preserveAspectRatio="xMidYMid meet">
+<g transform="translate(24,28) scale(0.75)">
+<g fill="none" stroke="#111111" stroke-width="30" stroke-linecap="round" stroke-linejoin="round">
+<path d="M 128 50 L 58 208"/>
+<path d="M 128 50 L 198 208"/>
+<path d="M 82 156 L 174 156"/>
+</g>
+</g>
+<text x="240" y="128" font-family="Helvetica Neue, Arial, sans-serif" font-size="96" font-weight="700" fill="#111111" letter-spacing="-2">AI Agent</text>
+<text x="240" y="190" font-family="PingFang SC, Helvetica Neue, Arial, sans-serif" font-size="28" fill="#6B7280" letter-spacing="2">智能聊天室</text>
+</svg>
+</g><g filter="url(#grey)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" x="90" y="660" width="64" height="64" preserveAspectRatio="xMidYMid meet">
+<g fill="none" stroke="#111111" stroke-width="30" stroke-linecap="round" stroke-linejoin="round">
+<path d="M 128 50 L 58 208"/>
+<path d="M 128 50 L 198 208"/>
+<path d="M 82 156 L 174 156"/>
+</g>
+</svg>
+</g><text x="122" y="744" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#8a8a8a" text-anchor="middle">64px</text><g filter="url(#grey)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" x="180" y="692" width="32" height="32" preserveAspectRatio="xMidYMid meet">
+<g fill="none" stroke="#111111" stroke-width="30" stroke-linecap="round" stroke-linejoin="round">
+<path d="M 128 50 L 58 208"/>
+<path d="M 128 50 L 198 208"/>
+<path d="M 82 156 L 174 156"/>
+</g>
+</svg>
+</g><text x="196" y="744" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#8a8a8a" text-anchor="middle">32px</text><g filter="url(#grey)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" x="238" y="708" width="16" height="16" preserveAspectRatio="xMidYMid meet">
+<g fill="none" stroke="#111111" stroke-width="30" stroke-linecap="round" stroke-linejoin="round">
+<path d="M 128 50 L 58 208"/>
+<path d="M 128 50 L 198 208"/>
+<path d="M 82 156 L 174 156"/>
+</g>
+</svg>
+</g><text x="246" y="744" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#8a8a8a" text-anchor="middle">16px</text><text x="90.0" y="780" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="26" font-weight="700" fill="#161616">A · Two Voices A</text><text x="90.0" y="814" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="19" fill="#555">两道对话的笔画构成 A：名字本身就是标志。</text><rect x="562.667" y="150" width="474.667" height="774" rx="18" fill="#fff" stroke="#161616" stroke-width="2"/><g filter="url(#grey)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" x="592.667" y="190" width="414.667" height="300" preserveAspectRatio="xMidYMid meet">
+<path fill="#111111" fill-rule="evenodd" d="
+M 84 32 H 172 A 44 44 0 0 1 216 76 V 164 A 44 44 0 0 1 172 208 H 160 L 148 232 L 136 208 H 84 A 44 44 0 0 1 40 164 V 76 A 44 44 0 0 1 84 32 Z
+M 88 64 H 168 A 24 24 0 0 1 192 88 V 168 A 24 24 0 0 1 168 192 H 88 A 24 24 0 0 1 64 168 V 88 A 24 24 0 0 1 88 64 Z
+"/>
+<path fill="#111111" d="M 88 88 H 128 A 14 14 0 0 1 142 102 V 130 A 14 14 0 0 1 128 144 H 122 L 134 158 L 104 144 A 14 14 0 0 1 88 130 V 102 A 14 14 0 0 1 88 88 Z"/>
+</svg>
+</g><g filter="url(#grey)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 256" x="592.667" y="514" width="414.667" height="120" preserveAspectRatio="xMidYMid meet">
+<g transform="translate(24,28) scale(0.75)">
+<path fill="#111111" fill-rule="evenodd" d="
+M 84 32 H 172 A 44 44 0 0 1 216 76 V 164 A 44 44 0 0 1 172 208 H 160 L 148 232 L 136 208 H 84 A 44 44 0 0 1 40 164 V 76 A 44 44 0 0 1 84 32 Z
+M 88 64 H 168 A 24 24 0 0 1 192 88 V 168 A 24 24 0 0 1 168 192 H 88 A 24 24 0 0 1 64 168 V 88 A 24 24 0 0 1 88 64 Z
+"/>
+<path fill="#111111" d="M 88 88 H 128 A 14 14 0 0 1 142 102 V 130 A 14 14 0 0 1 128 144 H 122 L 134 158 L 104 144 A 14 14 0 0 1 88 130 V 102 A 14 14 0 0 1 88 88 Z"/>
+</g>
+<text x="240" y="128" font-family="Helvetica Neue, Arial, sans-serif" font-size="96" font-weight="700" fill="#111111" letter-spacing="-2">AI Agent</text>
+<text x="240" y="190" font-family="PingFang SC, Helvetica Neue, Arial, sans-serif" font-size="28" fill="#6B7280" letter-spacing="2">智能聊天室</text>
+</svg>
+</g><g filter="url(#grey)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" x="592.667" y="660" width="64" height="64" preserveAspectRatio="xMidYMid meet">
+<path fill="#111111" fill-rule="evenodd" d="
+M 84 32 H 172 A 44 44 0 0 1 216 76 V 164 A 44 44 0 0 1 172 208 H 160 L 148 232 L 136 208 H 84 A 44 44 0 0 1 40 164 V 76 A 44 44 0 0 1 84 32 Z
+M 88 64 H 168 A 24 24 0 0 1 192 88 V 168 A 24 24 0 0 1 168 192 H 88 A 24 24 0 0 1 64 168 V 88 A 24 24 0 0 1 88 64 Z
+"/>
+<path fill="#111111" d="M 88 88 H 128 A 14 14 0 0 1 142 102 V 130 A 14 14 0 0 1 128 144 H 122 L 134 158 L 104 144 A 14 14 0 0 1 88 130 V 102 A 14 14 0 0 1 88 88 Z"/>
+</svg>
+</g><text x="624.667" y="744" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#8a8a8a" text-anchor="middle">64px</text><g filter="url(#grey)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" x="682.667" y="692" width="32" height="32" preserveAspectRatio="xMidYMid meet">
+<path fill="#111111" fill-rule="evenodd" d="
+M 84 32 H 172 A 44 44 0 0 1 216 76 V 164 A 44 44 0 0 1 172 208 H 160 L 148 232 L 136 208 H 84 A 44 44 0 0 1 40 164 V 76 A 44 44 0 0 1 84 32 Z
+M 88 64 H 168 A 24 24 0 0 1 192 88 V 168 A 24 24 0 0 1 168 192 H 88 A 24 24 0 0 1 64 168 V 88 A 24 24 0 0 1 88 64 Z
+"/>
+<path fill="#111111" d="M 88 88 H 128 A 14 14 0 0 1 142 102 V 130 A 14 14 0 0 1 128 144 H 122 L 134 158 L 104 144 A 14 14 0 0 1 88 130 V 102 A 14 14 0 0 1 88 88 Z"/>
+</svg>
+</g><text x="698.667" y="744" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#8a8a8a" text-anchor="middle">32px</text><g filter="url(#grey)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" x="740.667" y="708" width="16" height="16" preserveAspectRatio="xMidYMid meet">
+<path fill="#111111" fill-rule="evenodd" d="
+M 84 32 H 172 A 44 44 0 0 1 216 76 V 164 A 44 44 0 0 1 172 208 H 160 L 148 232 L 136 208 H 84 A 44 44 0 0 1 40 164 V 76 A 44 44 0 0 1 84 32 Z
+M 88 64 H 168 A 24 24 0 0 1 192 88 V 168 A 24 24 0 0 1 168 192 H 88 A 24 24 0 0 1 64 168 V 88 A 24 24 0 0 1 88 64 Z
+"/>
+<path fill="#111111" d="M 88 88 H 128 A 14 14 0 0 1 142 102 V 130 A 14 14 0 0 1 128 144 H 122 L 134 158 L 104 144 A 14 14 0 0 1 88 130 V 102 A 14 14 0 0 1 88 88 Z"/>
+</svg>
+</g><text x="748.667" y="744" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#8a8a8a" text-anchor="middle">16px</text><text x="592.6666666666667" y="780" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="26" font-weight="700" fill="#161616">B · Agent in the Room</text><text x="592.6666666666667" y="808" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="15" font-weight="700" fill="#161616" letter-spacing="1.5">RECOMMENDED</text><text x="592.6666666666667" y="842" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="19" fill="#555">一间房，一个 Agent 席位：房间里有人，也有 AI。</text><rect x="1065.33" y="150" width="474.667" height="774" rx="18" fill="#fff" stroke="#e4e4e0" stroke-width="1"/><g filter="url(#grey)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" x="1095.33" y="190" width="414.667" height="300" preserveAspectRatio="xMidYMid meet">
+<path fill="#111111" fill-rule="evenodd" d="
+M 60 48 H 116 A 28 28 0 0 1 144 76 V 132 A 28 28 0 0 1 116 160 H 58 L 40 184 L 32 160 A 28 28 0 0 1 32 132 V 76 A 28 28 0 0 1 60 48 Z
+M 84 74 H 92 A 14 14 0 0 1 106 88 V 120 A 14 14 0 0 1 92 134 H 84 A 14 14 0 0 1 70 120 V 88 A 14 14 0 0 1 84 74 Z
+"/>
+<path fill="#111111" d="M 182 116 H 210 A 18 18 0 0 1 228 134 V 162 A 18 18 0 0 1 210 180 H 200 L 216 200 L 182 180 A 18 18 0 0 1 164 162 V 134 A 18 18 0 0 1 182 116 Z"/>
+</svg>
+</g><g filter="url(#grey)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 256" x="1095.33" y="514" width="414.667" height="120" preserveAspectRatio="xMidYMid meet">
+<g transform="translate(24,28) scale(0.75)">
+<path fill="#111111" fill-rule="evenodd" d="
+M 60 48 H 116 A 28 28 0 0 1 144 76 V 132 A 28 28 0 0 1 116 160 H 58 L 40 184 L 32 160 A 28 28 0 0 1 32 132 V 76 A 28 28 0 0 1 60 48 Z
+M 84 74 H 92 A 14 14 0 0 1 106 88 V 120 A 14 14 0 0 1 92 134 H 84 A 14 14 0 0 1 70 120 V 88 A 14 14 0 0 1 84 74 Z
+"/>
+<path fill="#111111" d="M 182 116 H 210 A 18 18 0 0 1 228 134 V 162 A 18 18 0 0 1 210 180 H 200 L 216 200 L 182 180 A 18 18 0 0 1 164 162 V 134 A 18 18 0 0 1 182 116 Z"/>
+</g>
+<text x="240" y="128" font-family="Helvetica Neue, Arial, sans-serif" font-size="96" font-weight="700" fill="#111111" letter-spacing="-2">AI Agent</text>
+<text x="240" y="190" font-family="PingFang SC, Helvetica Neue, Arial, sans-serif" font-size="28" fill="#6B7280" letter-spacing="2">智能聊天室</text>
+</svg>
+</g><g filter="url(#grey)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" x="1095.33" y="660" width="64" height="64" preserveAspectRatio="xMidYMid meet">
+<path fill="#111111" fill-rule="evenodd" d="
+M 60 48 H 116 A 28 28 0 0 1 144 76 V 132 A 28 28 0 0 1 116 160 H 58 L 40 184 L 32 160 A 28 28 0 0 1 32 132 V 76 A 28 28 0 0 1 60 48 Z
+M 84 74 H 92 A 14 14 0 0 1 106 88 V 120 A 14 14 0 0 1 92 134 H 84 A 14 14 0 0 1 70 120 V 88 A 14 14 0 0 1 84 74 Z
+"/>
+<path fill="#111111" d="M 182 116 H 210 A 18 18 0 0 1 228 134 V 162 A 18 18 0 0 1 210 180 H 200 L 216 200 L 182 180 A 18 18 0 0 1 164 162 V 134 A 18 18 0 0 1 182 116 Z"/>
+</svg>
+</g><text x="1127.33" y="744" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#8a8a8a" text-anchor="middle">64px</text><g filter="url(#grey)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" x="1185.33" y="692" width="32" height="32" preserveAspectRatio="xMidYMid meet">
+<path fill="#111111" fill-rule="evenodd" d="
+M 60 48 H 116 A 28 28 0 0 1 144 76 V 132 A 28 28 0 0 1 116 160 H 58 L 40 184 L 32 160 A 28 28 0 0 1 32 132 V 76 A 28 28 0 0 1 60 48 Z
+M 84 74 H 92 A 14 14 0 0 1 106 88 V 120 A 14 14 0 0 1 92 134 H 84 A 14 14 0 0 1 70 120 V 88 A 14 14 0 0 1 84 74 Z
+"/>
+<path fill="#111111" d="M 182 116 H 210 A 18 18 0 0 1 228 134 V 162 A 18 18 0 0 1 210 180 H 200 L 216 200 L 182 180 A 18 18 0 0 1 164 162 V 134 A 18 18 0 0 1 182 116 Z"/>
+</svg>
+</g><text x="1201.33" y="744" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#8a8a8a" text-anchor="middle">32px</text><g filter="url(#grey)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" x="1243.33" y="708" width="16" height="16" preserveAspectRatio="xMidYMid meet">
+<path fill="#111111" fill-rule="evenodd" d="
+M 60 48 H 116 A 28 28 0 0 1 144 76 V 132 A 28 28 0 0 1 116 160 H 58 L 40 184 L 32 160 A 28 28 0 0 1 32 132 V 76 A 28 28 0 0 1 60 48 Z
+M 84 74 H 92 A 14 14 0 0 1 106 88 V 120 A 14 14 0 0 1 92 134 H 84 A 14 14 0 0 1 70 120 V 88 A 14 14 0 0 1 84 74 Z
+"/>
+<path fill="#111111" d="M 182 116 H 210 A 18 18 0 0 1 228 134 V 162 A 18 18 0 0 1 210 180 H 200 L 216 200 L 182 180 A 18 18 0 0 1 164 162 V 134 A 18 18 0 0 1 182 116 Z"/>
+</svg>
+</g><text x="1251.33" y="744" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#8a8a8a" text-anchor="middle">16px</text><text x="1095.3333333333335" y="780" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="26" font-weight="700" fill="#161616">C · Exchange</text><text x="1095.3333333333335" y="814" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="19" fill="#555">一大一小两个气泡：人类与 Agent 在同一场对话里。</text></svg>

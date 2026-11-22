@@ -50,8 +50,329 @@ class WireClient:
 
 
 class ServerIntegrationTests(unittest.TestCase):
+    def test_identity_and_group_nickname_protocol(self) -> None:
+        asyncio.run(self._identity_scenario())
+
+    async def _identity_scenario(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            config = replace(Config.from_env(), host="127.0.0.1", port=0, data_dir=root,
+                             database_path=root / "chat.sqlite3", uploads_dir=root / "uploads",
+                             admin_username=None, admin_password=None, agent_base_url="http://127.0.0.1:9/v1")
+            server = ChatServer(config)
+            await server.start()
+            port = int(server._server.sockets[0].getsockname()[1])
+            alice, bob = await asyncio.gather(WireClient.connect(port), WireClient.connect(port))
+            try:
+                for client, name in ((alice, "alice"), (bob, "bob01")):
+                    request = await client.send("auth.register", {"username": name, "password": "password-123"})
+                    await client.until("auth.result", request_id=request)
+                request = await alice.send("group.create", {"name": "研发组"})
+                group_id = (await alice.until("group.created", request_id=request))["payload"]["group"]["id"]
+                request = await bob.send("group.join", {"group_id": group_id})
+                await bob.until("ack", request_id=request)
+                request = await bob.send("profile.identity.set", {"username": "bob_new", "display_name": "小博"})
+                await bob.until("ack", request_id=request)
+                self.assertEqual((await alice.until("profile.updated"))["payload"]["user"]["username"], "bob_new")
+                request = await bob.send("group.nickname.set", {"group_id": group_id, "nickname": "研发小博"})
+                await bob.until("ack", request_id=request)
+                self.assertEqual((await alice.until("group.nickname.updated"))["payload"]["nickname"], "研发小博")
+                request = await bob.send("message.send", {"conversation_type": "group", "conversation_id": str(group_id), "content": "你好"})
+                self.assertEqual((await alice.until("message.event"))["payload"]["message"]["sender_name"], "研发小博")
+                await bob.until("ack", request_id=request)
+                request = await alice.send("group.members", {"group_id": group_id})
+                members = (await alice.until("group.members", request_id=request))["payload"]["members"]
+                self.assertEqual(next(member for member in members if member.get("username") == "bob_new")["nickname"], "研发小博")
+            finally:
+                await alice.close()
+                await bob.close()
+                await server.close()
+
+    def test_message_mutations_search_and_reconnect(self) -> None:
+        asyncio.run(self._message_scenario())
+
+    async def _message_scenario(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            config = replace(Config.from_env(), host="127.0.0.1", port=0, data_dir=root,
+                             database_path=root / "chat.sqlite3", uploads_dir=root / "uploads",
+                             admin_username=None, admin_password=None, agent_base_url="http://127.0.0.1:9/v1")
+            server = ChatServer(config)
+            await server.start()
+            port = int(server._server.sockets[0].getsockname()[1])
+            alice, bob = await asyncio.gather(WireClient.connect(port), WireClient.connect(port))
+            try:
+                for client, name in ((alice, "alice"), (bob, "bob01")):
+                    request = await client.send("auth.register", {"username": name, "password": "password-123"})
+                    await client.until("auth.result", request_id=request)
+                request = await alice.send("group.create", {"name": "M1 群"})
+                group = (await alice.until("group.created", request_id=request))["payload"]["group"]
+                scope = {"conversation_type": "group", "conversation_id": str(group["id"])}
+                request = await bob.send("group.join", {"group_id": group["id"]})
+                await bob.until("ack", request_id=request)
+                request = await alice.send("message.send", {**scope, "content": "first needle"}, request_id="stable-send")
+                first = (await bob.until("message.event"))["payload"]["message"]
+                await alice.until("message.event")
+                await alice.until("ack", request_id=request)
+                duplicate = await alice.send("message.send", {**scope, "content": "first needle"}, request_id="stable-send")
+                # The same connection reports a duplicate without mutating the timeline.
+                self.assertTrue((await alice.until("ack", request_id=duplicate))["payload"]["duplicate"])
+                request = await bob.send("message.send", {**scope, "content": "reply needle", "reply_to_id": first["id"]})
+                reply = (await alice.until("message.event"))["payload"]["message"]
+                await bob.until("ack", request_id=request)
+                self.assertEqual(reply["reply_to_id"], first["id"])
+                request = await bob.send("message.edit", {"message_id": first["id"], "content": "forged"})
+                await bob.until("error", request_id=request)
+                request = await bob.send("history.read", {**scope, "message_id": reply["id"]})
+                await bob.until("ack", request_id=request)
+                cursor = reply["event_id"]
+                await bob.close()
+                request = await alice.send("message.edit", {"message_id": first["id"], "content": "edited needle"})
+                edited = (await alice.until("message.edited"))["payload"]["message"]
+                await alice.until("ack", request_id=request)
+                self.assertEqual(edited["id"], first["id"])
+                request = await alice.send("message.recall", {"message_id": first["id"]})
+                await alice.until("message.recalled")
+                await alice.until("ack", request_id=request)
+                bob = await WireClient.connect(port)
+                request = await bob.send("auth.login", {"username": "bob01", "password": "password-123", "after_event_id": cursor})
+                auth = (await bob.until("auth.result", request_id=request))["payload"]
+                self.assertEqual([item["event_type"] for item in auth["offline_events"]], ["message.edited", "message.recalled"])
+                self.assertEqual(auth["offline_messages"], [])
+                request = await bob.send("history.search", {**scope, "keyword": "needle", "limit": 1})
+                search = (await bob.until("history.result", request_id=request))["payload"]
+                self.assertEqual(search["messages"][0]["id"], reply["id"])
+                self.assertFalse(search["has_more"])
+                request = await bob.send("message.send", {**scope, "content": "bad", "reply_to_id": 999999})
+                await bob.until("error", request_id=request)
+                png = base64.b64decode(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                )
+                request = await alice.send("message.send", {**scope, "message_type": "image",
+                                                "image_name": "photo.png", "image_mime": "image/png",
+                                                "image_data": base64.b64encode(png).decode("ascii")})
+                image = (await bob.until("message.event"))["payload"]["message"]
+                await alice.until("ack", request_id=request)
+                request = await bob.send("history.sync", {**scope, "limit": 10, "media_mode": "metadata"})
+                history = (await bob.until("history.result", request_id=request))["payload"]["messages"]
+                image_meta = next(item for item in history if item["id"] == image["id"])
+                self.assertNotIn("image_data", image_meta)
+                request = await bob.send("media.get", {"message_id": image["id"]})
+                loaded = (await bob.until("media.result", request_id=request))["payload"]["message"]
+                self.assertEqual(base64.b64decode(loaded["image_data"]), png)
+                request = await alice.send(
+                    "message.send",
+                    {
+                        **scope,
+                        "message_type": "sticker",
+                        "sticker_id": "local-happy",
+                        "sticker_name": "开心",
+                        "image_name": "happy.png",
+                        "image_mime": "image/png",
+                        "image_data": base64.b64encode(png).decode("ascii"),
+                    },
+                )
+                sticker = (await bob.until("message.event"))["payload"]["message"]
+                await alice.until("ack", request_id=request)
+                self.assertEqual(sticker["message_type"], "sticker")
+                self.assertEqual(sticker["sticker"]["name"], "开心")
+                self.assertEqual(base64.b64decode(sticker["image_data"]), png)
+            finally:
+                await alice.close()
+                await bob.close()
+                await server.close()
+
     def test_three_clients_chat_disconnect_and_agent_failure_isolation(self) -> None:
         asyncio.run(self._scenario())
+
+    def test_agent_management_memory_and_tool_protocol(self) -> None:
+        asyncio.run(self._agent_management_scenario())
+
+    async def _agent_management_scenario(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            config = replace(
+                Config.from_env(),
+                host="127.0.0.1",
+                port=0,
+                data_dir=root,
+                database_path=root / "chat.sqlite3",
+                uploads_dir=root / "uploads",
+                admin_username=None,
+                admin_password=None,
+                agent_base_url="http://127.0.0.1:9/v1",
+                agent_timeout_seconds=1,
+            )
+            server = ChatServer(config)
+            await server.start()
+            assert server._server and server._server.sockets
+            port = int(server._server.sockets[0].getsockname()[1])
+            alice, bob = await asyncio.gather(WireClient.connect(port), WireClient.connect(port))
+            try:
+                users: dict[str, dict[str, Any]] = {}
+                for client, name in ((alice, "alice"), (bob, "bob01")):
+                    request = await client.send(
+                        "auth.register", {"username": name, "password": "password-123"}
+                    )
+                    users[name] = (await client.until("auth.result", request_id=request))["payload"]["user"]
+                request = await alice.send("group.create", {"name": "Agent 协议组"})
+                group_id = (await alice.until("group.created", request_id=request))["payload"]["group"]["id"]
+                request = await bob.send("group.join", {"group_id": group_id})
+                await bob.until("ack", request_id=request)
+
+                request = await alice.send(
+                    "agent.create",
+                    {
+                        "name": "协议助手",
+                        "description": "协议测试",
+                        "card": {
+                            "personality": "严谨",
+                            "background": "协议测试",
+                            "language_style": "短句",
+                            "behavior_rules": "不读取未授权会话",
+                        },
+                        "memory_enabled": True,
+                    },
+                )
+                created = (await alice.until("agent.created", request_id=request))["payload"]["agent"]
+                agent_id = created["id"]
+                self.assertEqual(created["card"]["personality"], "严谨")
+                request = await alice.send("agent.list")
+                listed = (await alice.until("agent.list", request_id=request))["payload"]
+                self.assertIn(agent_id, {item["id"] for item in listed["agents"]})
+                self.assertTrue(listed["models"])
+                request = await alice.send("agent.avatar.get", {"agent_id": "agent_taffy"})
+                preset_avatar = (await alice.until("agent.avatar.result", request_id=request))["payload"]
+                self.assertEqual(preset_avatar["avatar_version"], 1)
+                self.assertEqual(preset_avatar["avatar_mime"], "image/png")
+                self.assertTrue(
+                    base64.b64decode(preset_avatar["image_data"]).startswith(b"\x89PNG\r\n\x1a\n")
+                )
+
+                request = await bob.send("agent.update", {"agent_id": agent_id, "name": "劫持"})
+                await bob.until("error", request_id=request)
+                request = await bob.send(
+                    "agent.group.set", {"group_id": group_id, "agent_id": agent_id, "enabled": True}
+                )
+                await bob.until("error", request_id=request)
+                request = await alice.send(
+                    "agent.group.set", {"group_id": group_id, "agent_id": agent_id, "enabled": True}
+                )
+                await alice.until("agent.group.updated", request_id=request)
+                request = await alice.send("group.members", {"group_id": group_id})
+                members = (await alice.until("group.members", request_id=request))["payload"]["members"]
+                self.assertIn(agent_id, {item["id"] for item in members if item["kind"] == "agent"})
+
+                request = await bob.send(
+                    "agent.create",
+                    {"name": "越权角色", "group_id": group_id},
+                )
+                await bob.until("error", request_id=request)
+                request = await alice.send(
+                    "agent.create",
+                    {
+                        "name": "群内预设角色",
+                        "description": "创建后直接加入当前群",
+                        "group_id": group_id,
+                    },
+                )
+                created_in_group = (
+                    await alice.until("agent.created", request_id=request)
+                )["payload"]
+                self.assertIn(
+                    created_in_group["agent"]["id"],
+                    {item["id"] for item in created_in_group["group_agents"]},
+                )
+
+                mention_text = "@协议助手 你好"
+                request = await alice.send(
+                    "message.send",
+                    {
+                        "conversation_type": "group",
+                        "conversation_id": group_id,
+                        "message_type": "text",
+                        "content": mention_text,
+                        "mentions": [
+                            {
+                                "member_id": f"agent:{agent_id}",
+                                "display": "协议助手",
+                                "start": 0,
+                                "length": 5,
+                            }
+                        ],
+                    },
+                )
+                trigger = (await alice.until("message.event"))["payload"]["message"]
+                self.assertEqual(trigger["mentions"][0]["agent_id"], agent_id)
+                await alice.until("ack", request_id=request)
+                await bob.until("message.event")
+                result = await alice.until("agent.result", timeout=4.0)
+                while result["payload"].get("status") != "failed":
+                    result = await alice.until("agent.result", timeout=4.0)
+                self.assertEqual(result["payload"]["agent_id"], agent_id)
+                self.assertFalse(result["payload"]["success"])
+
+                private_id = f"dm:{min(users['alice']['id'], users['bob01']['id'])}:{max(users['alice']['id'], users['bob01']['id'])}"
+                private_scope = {
+                    "conversation_type": "private",
+                    "conversation_id": private_id,
+                    "agent_id": agent_id,
+                }
+                request = await alice.send("memory.settings.set", {**private_scope, "enabled": True})
+                await alice.until("memory.settings.updated", request_id=request)
+                request = await alice.send(
+                    "memory.add", {**private_scope, "content": "发布代号是青竹", "kind": "fact"}
+                )
+                memory = (await alice.until("memory.saved", request_id=request))["payload"]["memory"]
+                request = await alice.send("memory.list", private_scope)
+                listed_memories = (await alice.until("memory.list", request_id=request))["payload"]["memories"]
+                self.assertEqual([item["id"] for item in listed_memories], [memory["id"]])
+                request = await bob.send("memory.list", private_scope)
+                bob_memories = (await bob.until("memory.list", request_id=request))["payload"]["memories"]
+                self.assertEqual(bob_memories, [])
+                request = await bob.send("memory.delete", {"memory_id": memory["id"]})
+                await bob.until("error", request_id=request)
+
+                group_scope = {
+                    "conversation_type": "group",
+                    "conversation_id": str(group_id),
+                    "agent_id": agent_id,
+                }
+                request = await alice.send("memory.settings.set", {**group_scope, "enabled": True})
+                await alice.until("memory.settings.updated", request_id=request)
+                request = await alice.send(
+                    "memory.add", {**group_scope, "content": "周五发布", "kind": "decision"}
+                )
+                group_memory = (await alice.until("memory.saved", request_id=request))["payload"]["memory"]
+                request = await bob.send("memory.list", group_scope)
+                shared = (await bob.until("memory.list", request_id=request))["payload"]["memories"]
+                self.assertEqual([item["id"] for item in shared], [group_memory["id"]])
+                request = await bob.send("memory.delete", {"memory_id": group_memory["id"]})
+                await bob.until("error", request_id=request)
+
+                request = await bob.send(
+                    "agent.tool.set", {"agent_id": agent_id, "tools": ["save_agent_result"]}
+                )
+                await bob.until("error", request_id=request)
+                request = await alice.send(
+                    "agent.tool.set", {"agent_id": agent_id, "tools": ["save_agent_result"]}
+                )
+                tools = (await alice.until("agent.tools.updated", request_id=request))["payload"]["tools"]
+                self.assertEqual(
+                    [item["name"] for item in tools if item["enabled"]], ["save_agent_result"]
+                )
+                request = await alice.send(
+                    "agent.update", {"agent_id": agent_id, "model_profile_id": "missing-profile"}
+                )
+                await alice.until("error", request_id=request)
+                request = await alice.send("agent.delete", {"agent_id": "agent"})
+                await alice.until("error", request_id=request)
+                request = await alice.send("agent.delete", {"agent_id": agent_id})
+                await alice.until("ack", request_id=request)
+            finally:
+                await alice.close()
+                await bob.close()
+                await server.close()
 
     async def _scenario(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

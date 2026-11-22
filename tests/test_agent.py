@@ -191,6 +191,13 @@ class AgentTests(unittest.TestCase):
             self.assertIn("### 主要话题", summary)
             self.assertIn("### 核心结论", summary)
             self.assertIn("### 待确认事项", summary)
+            summary_message = database.recent_history(owner["id"], "group", scope_id, 1)[0]
+            self.assertEqual(summary_message["card"]["kind"], "summary")
+            self.assertEqual(summary_message["card"]["overview"], "TCP 联调")
+            self.assertEqual(
+                [item["text"] for item in summary_message["card"]["conclusions"]],
+                ["已完成"],
+            )
 
             await service.invoke(owner["id"], "group", scope_id, "提取最近50条消息中的待办")
             todo = database.recent_history(owner["id"], "group", scope_id, 1)[0]["content"]
@@ -198,6 +205,12 @@ class AgentTests(unittest.TestCase):
             self.assertIn("### 明确任务", todo)
             self.assertIn("### 建议跟进", todo)
             self.assertIn("### 信息缺失", todo)
+            todo_message = database.recent_history(owner["id"], "group", scope_id, 1)[0]
+            self.assertEqual(todo_message["card"]["kind"], "todo")
+            self.assertEqual(len(todo_message["card"]["tasks"]), 1)
+            self.assertEqual(todo_message["card"]["tasks"][0]["title"], "补充演示录屏")
+            self.assertEqual(todo_message["card"]["tasks"][0]["owner"], "owner")
+            self.assertEqual(todo_message["card"]["tasks"][0]["due"], "")
 
 
 if __name__ == "__main__":

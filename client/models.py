@@ -11,6 +11,11 @@ class ConversationKey:
     kind: str
     identifier: str
 
+    @property
+    def storage_id(self) -> str:
+        """Stable local identifier shared by drafts and view caches."""
+        return f"{self.kind}:{self.identifier}"
+
     @classmethod
     def from_payload(
         cls, payload: dict[str, Any], current_user_id: int | str | None = None
@@ -59,7 +64,11 @@ class AppState:
     current_conversation: ConversationKey | None = None
     conversations: list[ConversationSummary] = field(default_factory=list)
     messages: dict[ConversationKey, list[dict[str, Any]]] = field(default_factory=dict)
+    history_loaded_at: dict[ConversationKey, float] = field(default_factory=dict)
     search_results: dict[ConversationKey, list[dict[str, Any]]] = field(default_factory=dict)
+    search_has_more: dict[ConversationKey, bool] = field(default_factory=dict)
+    event_cursor: int = 0
+    events_has_more: bool = False
     users: list[dict[str, Any]] = field(default_factory=list)
     groups: list[dict[str, Any]] = field(default_factory=list)
     members: list[dict[str, Any]] = field(default_factory=list)
@@ -69,7 +78,20 @@ class AppState:
     avatar_cache: dict[int, dict[str, Any]] = field(default_factory=dict)
     activities: list[dict[str, Any]] = field(default_factory=list)
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    agent_runs: dict[int, dict[str, Any]] = field(default_factory=dict)
+    agent_notices: dict[ConversationKey, str] = field(default_factory=dict)
+    agents: list[dict[str, Any]] = field(default_factory=list)
+    agent_models: list[dict[str, Any]] = field(default_factory=list)
+    agent_presets: list[dict[str, Any]] = field(default_factory=list)
+    agent_tools: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    tool_definitions: list[dict[str, Any]] = field(default_factory=list)
+    group_agents: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    memories: dict[tuple[str, str, str], list[dict[str, Any]]] = field(default_factory=dict)
+    memory_settings: dict[tuple[str, str, str], bool] = field(default_factory=dict)
+    agent_avatar_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
     system_status: dict[str, Any] = field(default_factory=dict)
     pending: dict[str, str] = field(default_factory=dict)
+    pending_sends: dict[str, tuple[ConversationKey, str, list[dict[str, Any]], int | None]] = field(default_factory=dict)
+    failed_send: tuple[ConversationKey, str, list[dict[str, Any]], int | None] | None = None
     last_error: str = ""
 

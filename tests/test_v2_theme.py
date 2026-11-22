@@ -262,3 +262,19 @@ class V2ThemeTests(unittest.TestCase):
         self.assertEqual(workspace.pages.currentIndex(), 2)
         self.assertTrue(workspace.nav_buttons[2].isChecked())
         self.assertNotEqual(workspace.nav_buttons[2].icon().cacheKey(), light_icon_key)
+
+    def test_brand_logo_uses_theme_specific_resource(self) -> None:
+        from client.v2.icons import brand_logo_icon
+        from client.v2.theme import ThemeMode
+
+        manager = self._install()
+        light_icon = brand_logo_icon(30)
+        self.assertFalse(light_icon.isNull())
+        light_key = light_icon.cacheKey()
+
+        manager.set_mode(ThemeMode.DARK)
+        self.app.processEvents()
+
+        dark_icon = brand_logo_icon(30)
+        self.assertFalse(dark_icon.isNull())
+        self.assertNotEqual(dark_icon.cacheKey(), light_key)

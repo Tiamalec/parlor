@@ -1,0 +1,52 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>Parlor — Logo 使用规范</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#F5F7FA;color:#172033;font-family:-apple-system,"PingFang SC","Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased}
+.page{width:1400px;margin:0 auto;padding:56px 64px 48px;background:#fff}
+.kicker{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#667085;font-weight:600}
+h1{font-size:44px;line-height:1.1;margin:10px 0 8px;letter-spacing:-.02em}h2{font-size:18px;margin:0 0 16px;letter-spacing:-.01em}
+.sub{font-size:15px;color:#566176;line-height:1.6;margin:0}
+.hero{display:flex;gap:56px;align-items:center;margin:40px 0 44px}.hero .mark{flex:0 0 640px;background:#F8FAFC;border:1px solid #DCE2EA;border-radius:16px;padding:44px 40px}.hero .mark img{width:100%;display:block}.hero .copy{flex:1}
+.lead{font-size:19px;line-height:1.55;margin:0 0 16px}.body{font-size:14px;line-height:1.75;color:#566176;margin:0 0 12px}
+.rule{border-top:1px solid #DCE2EA;margin:40px 0}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:48px}.panel{background:#F8FAFC;border:1px solid #DCE2EA;border-radius:14px;padding:28px}
+.swatches{display:grid;grid-template-columns:1fr 1fr;gap:14px}.sw{display:flex;gap:12px;align-items:center}.chip{width:52px;height:52px;border-radius:10px;border:1px solid rgba(23,32,51,.08)}.sw b{display:block;font-size:13px}.sw span{display:block;font-size:11px;color:#667085;margin-top:2px}
+.clear{position:relative;display:flex;align-items:center;justify-content:center;height:230px}.clear .box{position:relative;padding:26px;border:1px dashed #98A2B3;border-radius:8px}.clear .box img{width:150px;display:block}.clear .x{position:absolute;font-size:11px;color:#667085}.clear .x.top{top:-18px;left:50%;transform:translateX(-50%)}.clear .x.left{left:-30px;top:50%;transform:translateY(-50%)}
+.sizes{display:flex;gap:36px;align-items:flex-end;flex-wrap:wrap}.size{text-align:center}.size img{display:block;margin:0 auto 10px}.size .lab{font-size:12px;color:#667085}.size .val{font-size:13px;font-weight:600}
+.bgs{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}.bg{border-radius:12px;padding:22px;display:flex;align-items:center;justify-content:center;min-height:150px}.bg img{max-width:100%}.bg.white{background:#fff;border:1px solid #DCE2EA}.bg.ink{background:#172033}.bg.purple{background:#6B4FD3}.bg.subtle{background:#EAF0FF;border:1px solid #DCE2EA}
+.bg .cap{position:relative}.cap span{display:block;text-align:center;font-size:11px;margin-top:10px}
+.donts{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.dont{border:1px solid #DCE2EA;border-radius:12px;padding:18px;font-size:13px;line-height:1.55;color:#566176}.dont b{display:block;color:#172033;font-size:13px;margin-bottom:4px}
+footer{display:flex;justify-content:space-between;gap:24px;border-top:1px solid #DCE2EA;margin-top:44px;padding-top:18px;font-size:11px;color:#667085;line-height:1.6}
+</style></head><body><div class="page">
+<header><div class="kicker">PARLOR · LOGO GUIDELINES</div><h1>Parlor — Logo 使用规范</h1><p class="sub">一间房，一个 Agent 席位。安静、现代、可靠，16px 仍能辨认。</p></header>
+<section class="hero"><div class="mark"><img src="ai-agent-horizontal-color.svg" alt="Parlor horizontal lockup"></div><div class="copy"><p class="lead">不是多了一个 AI 功能，而是房间里多了一个 Agent 成员。</p><p class="body">外层是共享房间与对话尾巴，内层实心气泡是 Agent 席位。Ink 让房间保持安静，Agent 紫只落在成员身上；单色与反白都不依赖第二种颜色。</p><p class="body">字标使用 Avenir Next Demi Bold 转曲，已做收紧密排；文件内不含 live text。</p></div></section>
+<div class="rule"></div>
+<section class="grid"><div class="panel"><h2>颜色</h2><div class="swatches">
+<div class="sw"><div class="chip" style="background:#172033"></div><div><b>Ink</b><span>#172033 · 房间 / 字标</span></div></div>
+<div class="sw"><div class="chip" style="background:#6B4FD3"></div><div><b>Agent Purple</b><span>#6B4FD3 · Agent 席位</span></div></div>
+<div class="sw"><div class="chip" style="background:#B59CFF"></div><div><b>Light Agent</b><span>#B59CFF · 深底反白</span></div></div>
+<div class="sw"><div class="chip" style="background:#FFFFFF"></div><div><b>White</b><span>#FFFFFF · 反白房间 / 字标</span></div></div>
+</div><p class="body" style="margin-top:18px">CMYK / Pantone 见 <b>brand-guidelines.md</b>。产品 UI 的主操作蓝仍为 <b>#356AE6</b>，标志本身不使用蓝色。</p></div>
+<div class="panel"><h2>留白</h2><div class="clear"><div class="box"><span class="x top">1X</span><span class="x left">1X</span><img src="ai-agent-symbol-color.svg" alt="clear space"></div></div><p class="body" style="margin-top:8px">1X = Agent 内层气泡高度（符号坐标约 56/256）。四周至少 1X，随标志缩放。</p></div></section>
+<div class="rule"></div>
+<section><h2>尺寸</h2><div class="sizes">
+<div class="size"><img src="ai-agent-horizontal-color.svg" style="width:240px"><div class="val">横版组合</div><div class="lab">最小 120px 宽 / 30mm</div></div>
+<div class="size"><img src="ai-agent-symbol-color.svg" style="width:64px"><div class="val">符号 64px</div><div class="lab">24px 起 / 6mm</div></div>
+<div class="size"><img src="ai-agent-symbol-color.svg" style="width:32px"><div class="val">32px</div><div class="lab">列表 / 头像</div></div>
+<div class="size"><img src="ai-agent-symbol-small.svg" style="width:16px"><div class="val">16px</div><div class="lab">favicon 简化裁切</div></div>
+<div class="size"><img src="dist/ai-agent-app-icon.svg" style="width:96px;border-radius:22px"><div class="val">App 图标</div><div class="lab">白色符号 / Agent 紫底</div></div>
+</div></section>
+<div class="rule"></div>
+<section><h2>允许的背景</h2><div class="bgs">
+<div class="bg white"><div class="cap"><img src="ai-agent-horizontal-color.svg" style="width:260px"><span style="color:#667085">白 / #F5F7FA</span></div></div>
+<div class="bg ink"><div class="cap"><img src="ai-agent-horizontal-reversed.svg" style="width:260px"><span style="color:#B7C0CE">Ink / 深色</span></div></div>
+<div class="bg purple"><div class="cap"><img src="ai-agent-symbol-white-preview.svg" style="width:96px"><span style="color:#fff">Agent Purple</span></div></div>
+<div class="bg subtle"><div class="cap"><img src="ai-agent-symbol-color.svg" style="width:88px"><span style="color:#566176">登录页品牌块</span></div></div>
+</div></section>
+<div class="rule"></div>
+<section><h2>不要</h2><div class="donts">
+<div class="dont"><b>不要拉伸或旋转</b>保持原始比例；组合内部元素不单独缩放。</div>
+<div class="dont"><b>不要加效果</b>渐变、阴影、描边、发光都会削弱 16px 的可读性。</div>
+<div class="dont"><b>不要重打字标</b>使用已转曲 SVG；不要用字体重新键入 Parlor。</div>
+</div></section>
+<footer><div>Parlor · 本地 AI Agent 智能聊天室<br>母版：ai-agent-*.svg · 图标：dist/ · 演示：presentation.html</div><div style="text-align:right">Logo guidelines · 2026-11-22<br>正式商用前请完成商标检索</div></footer>
+</div></body></html>
