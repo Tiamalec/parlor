@@ -1429,6 +1429,7 @@ class V2UiTests(unittest.TestCase):
         pane.set_conversation(key, "项目组")
         pane.show()
         self.app.processEvents()
+        self.assertTrue(pane.eventFilter(QLabel(), QEvent(QEvent.Type.ToolTip)))
 
         avatars = pane.findChildren(UserAvatar)
         self.assertTrue(avatars)
@@ -1454,7 +1455,17 @@ class V2UiTests(unittest.TestCase):
         self.app.processEvents()
         long_card.setFixedWidth(260)
         self.app.processEvents()
-        self.assertEqual(long_card._title.toolTip(), long_title)
+        self.assertEqual(long_card._title.toolTip(), "")
+        self.assertEqual(long_card._title.accessibleName(), long_title)
+
+        unread = ConversationCard(
+            ConversationSummary(key, "群聊", preview="这是一段很长的会话预览" * 4, unread_count=3)
+        )
+        unread.show()
+        self.app.processEvents()
+        self.assertEqual(unread._title.toolTip(), "")
+        self.assertEqual(unread._preview.toolTip(), "")
+        self.assertEqual(unread._badge.toolTip(), "")
 
         state = AppState()
         state.agent_model = "deepseek-flash"

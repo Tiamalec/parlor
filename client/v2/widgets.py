@@ -316,7 +316,7 @@ class UserAvatar(Avatar):
             agent=self.profile.kind == "agent",
         )
         if self.profile.avatar_load_failed or (image_data is not None and avatar_image(image_data).isNull()):
-            self.setToolTip(f"{self.profile.display_name}（头像暂时无法加载）")
+            self.setAccessibleName(f"{self.profile.display_name}（头像暂时无法加载）")
 
     def mousePressEvent(self, event: Any) -> None:
         super().mousePressEvent(event)
@@ -744,13 +744,14 @@ class ConversationCard(QFrame):
         self.summary = summary
         if summary.title != previous_title:
             self._avatar.set_avatar(summary.title, group=summary.key.kind == "group")
+        self._title.setAccessibleName(summary.title)
         self._refresh_title()
         self._clock.setText(
             time.strftime("%H:%M", time.localtime(summary.timestamp)) if summary.timestamp else ""
         )
         if summary.unread_count:
             self._badge.setText(str(min(summary.unread_count, 99)))
-            self._badge.setToolTip(f"{summary.unread_count} 条未读")
+            self._badge.setAccessibleName(f"{summary.unread_count} 条未读")
             self._badge.show()
         else:
             self._badge.clear()
@@ -762,16 +763,10 @@ class ConversationCard(QFrame):
         title = self.summary.title
         if available <= 0 or self._title.width() <= 0:
             self._title.setText(title)
-            self._sync_title_tooltip("")
             return
         elided = self._title.fontMetrics().elidedText(title, Qt.TextElideMode.ElideRight, available)
         if self._title.text() != elided:
             self._title.setText(elided)
-        self._sync_title_tooltip(title if elided != title else "")
-
-    def _sync_title_tooltip(self, value: str) -> None:
-        if self._title.toolTip() != value:
-            self._title.setToolTip(value)
 
     def resizeEvent(self, event: Any) -> None:
         super().resizeEvent(event)
@@ -796,8 +791,6 @@ class ConversationCard(QFrame):
             self._preview.setText(self._default_preview())
             self._preview.setAccessibleName("")
             style_name = "Muted"
-        if self._preview.toolTip():
-            self._preview.setToolTip("")
         if self._preview.objectName() != style_name:
             self._preview.setObjectName(style_name)
             self._preview.style().unpolish(self._preview)
@@ -999,7 +992,6 @@ class MessageBubble(QFrame):
                             )
                         )
                     image.setCursor(Qt.CursorShape.PointingHandCursor)
-                    image.setToolTip("点击预览")
                     image.activated.connect(
                         lambda value=data: self._preview_media(value)
                     )

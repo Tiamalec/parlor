@@ -51,6 +51,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QTextEdit,
     QToolButton,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -730,7 +731,7 @@ class ChatPane(QWidget):
         self.new_messages_badge = QPushButton("0 条新消息")
         self.new_messages_badge.setObjectName("NewMessagesBadge")
         self.new_messages_badge.setAccessibleName("查看最新消息")
-        self.new_messages_badge.setToolTip("有新消息，点击跳到最新内容")
+        self.new_messages_badge.setAccessibleDescription("有新消息，点击跳到最新内容")
         self.new_messages_badge.setCursor(Qt.CursorShape.PointingHandCursor)
         self.new_messages_badge.setIconSize(QSize(14, 14))
         self.new_messages_badge.setParent(self.scroll)
@@ -852,6 +853,11 @@ class ChatPane(QWidget):
         QShortcut(QKeySequence("Escape"), self, activated=self._hide_details)
         self._emoji_menu()
         self._ai_menu()
+        self._suppress_tooltips_until = 0.0
+        self._tooltip_guard_timer = QTimer(self)
+        self._tooltip_guard_timer.setSingleShot(True)
+        self._tooltip_guard_timer.setInterval(1050)
+        self._tooltip_guard_timer.timeout.connect(self._release_tooltip_guard)
 
     @staticmethod
     def _create_draft_store() -> DraftStore:
@@ -1054,6 +1060,10 @@ class ChatPane(QWidget):
         self.set_history_loading(self.key, self.service.history_loading(self.key))
 
     def closeEvent(self, event: Any) -> None:
+        self._tooltip_guard_timer.stop()
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
         self._render_timer.stop()
         self._draft_timer.stop()
         self.flush_drafts()
@@ -1147,6 +1157,15 @@ class ChatPane(QWidget):
             self._refresh_agent_activity()
             self._refresh_subtitle()
             return
+        # A rebuilt message list can place a fresh tooltip target under the
+        # stationary pointer. Suppress automatic tooltips briefly so Windows
+        # does not flash a small native tooltip window during the switch.
+        self._suppress_tooltips_until = time.monotonic() + 1.0
+        QToolTip.hideText()
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+            self._tooltip_guard_timer.start()
         self._stop_private_typing()
         self._peer_typing_timer.stop()
         self.profile_popover.hide()
@@ -1171,11 +1190,13 @@ class ChatPane(QWidget):
         self.details_button.setAccessibleName(
             "打开群设置" if key.kind == "group" else "打开会话详情"
         )
-        self.details_button.setToolTip(
+        details_tip = (
             "管理群成员、AI Agent、共享记忆和定时总结"
             if key.kind == "group"
             else "查看会话与成员信息"
         )
+        if self.details_button.toolTip() != details_tip:
+            self.details_button.setToolTip(details_tip)
         self._refresh_subtitle()
         self.avatar.set_avatar(title, group=key.kind == "group")
         self._hide_mentions()
@@ -1729,6 +1750,8 @@ class ChatPane(QWidget):
         self._sync_new_messages_badge()
 
     def eventFilter(self, watched: Any, event: Any) -> bool:
+        if event.type() == QEvent.Type.ToolTip and time.monotonic() < self._suppress_tooltips_until:
+            return True
         if watched is self.scroll and event.type() in (QEvent.Type.Resize, QEvent.Type.Show):
             self._position_new_messages_badge()
             if event.type() == QEvent.Type.Show and self._follow_pending:
@@ -1737,6 +1760,14 @@ class ChatPane(QWidget):
             if event.type() in (QEvent.Type.Wheel, QEvent.Type.KeyPress, QEvent.Type.MouseButtonPress):
                 self._stop_scroll_animation()
         return super().eventFilter(watched, event)
+
+    def _release_tooltip_guard(self) -> None:
+        if time.monotonic() < self._suppress_tooltips_until:
+            self._tooltip_guard_timer.start()
+            return
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
 
     def _complete_render_focus(self, serial: int) -> None:
         if serial != self._render_serial:
@@ -1831,9 +1862,11 @@ class ChatPane(QWidget):
 
     def _refresh_private_state(self) -> None:
         allowed = self._private_can_send()
+        tip = "" if allowed else "当前私聊不可发送"
         for widget in (self.compose, self.send, self.image, self.sticker, self.ai):
             widget.setEnabled(allowed)
-            widget.setToolTip("" if allowed else "当前私聊不可发送")
+            if widget.toolTip() != tip:
+                widget.setToolTip(tip)
         if not allowed:
             self._stop_private_typing()
 
