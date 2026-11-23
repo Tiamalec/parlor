@@ -259,7 +259,10 @@ class Avatar(QLabel):
             avatar_pixmap(name, self._size, image_data, agent=self._agent, group=self._group)
         )
         self._has_pixmap = True
-        self.setToolTip(name)
+        # Avatars are rebuilt while conversations switch. A tooltip attached to
+        # a newly created avatar under a stationary pointer makes Windows flash
+        # a small tooltip window, so keep the name as accessibility text only.
+        self.setAccessibleName(name)
 
     def _theme_changed(self, _snapshot: ThemeSnapshot) -> None:
         self.setPixmap(
@@ -298,6 +301,9 @@ class UserAvatar(Avatar):
         self._hover_timer.setSingleShot(True)
         self._hover_timer.setInterval(self.HOVER_DELAY_MS)
         self._hover_timer.timeout.connect(self._emit_hover)
+        self._hover_armed = False
+        if hoverable:
+            self.setMouseTracking(True)
         self.refresh(profile)
 
     def refresh(self, profile: ProfileViewModel | None = None) -> None:
@@ -320,16 +326,26 @@ class UserAvatar(Avatar):
 
     def enterEvent(self, event: Any) -> None:
         super().enterEvent(event)
+        # A re-render can place a new avatar under a stationary pointer, which
+        # produces a synthetic enter event. Arm hover only after real pointer
+        # movement so that doesn't flash the profile popover.
+        self._hover_armed = False
+        self._hover_timer.stop()
+
+    def mouseMoveEvent(self, event: Any) -> None:
+        super().mouseMoveEvent(event)
         if self.hoverable:
+            self._hover_armed = True
             self._hover_timer.start()
 
     def leaveEvent(self, event: Any) -> None:
         self._hover_timer.stop()
+        self._hover_armed = False
         self.hover_left.emit(self.profile)
         super().leaveEvent(event)
 
     def _emit_hover(self) -> None:
-        if self.hoverable and self.underMouse():
+        if self.hoverable and self._hover_armed and self.underMouse():
             self.profile_hovered.emit(self.profile, self)
 
     def contextMenuEvent(self, event: Any) -> None:
@@ -729,7 +745,6 @@ class ConversationCard(QFrame):
         if summary.title != previous_title:
             self._avatar.set_avatar(summary.title, group=summary.key.kind == "group")
         self._refresh_title()
-        self._title.setToolTip(summary.title)
         self._clock.setText(
             time.strftime("%H:%M", time.localtime(summary.timestamp)) if summary.timestamp else ""
         )
@@ -747,10 +762,16 @@ class ConversationCard(QFrame):
         title = self.summary.title
         if available <= 0 or self._title.width() <= 0:
             self._title.setText(title)
+            self._sync_title_tooltip("")
             return
         elided = self._title.fontMetrics().elidedText(title, Qt.TextElideMode.ElideRight, available)
         if self._title.text() != elided:
             self._title.setText(elided)
+        self._sync_title_tooltip(title if elided != title else "")
+
+    def _sync_title_tooltip(self, value: str) -> None:
+        if self._title.toolTip() != value:
+            self._title.setToolTip(value)
 
     def resizeEvent(self, event: Any) -> None:
         super().resizeEvent(event)
@@ -769,14 +790,14 @@ class ConversationCard(QFrame):
     def _refresh_preview(self) -> None:
         if self._draft_preview:
             self._preview.setText(f"[草稿] {self._draft_preview}")
-            self._preview.setToolTip(f"未发送草稿：{self._draft_preview}")
             self._preview.setAccessibleName("未发送草稿")
             style_name = "DraftPreview"
         else:
             self._preview.setText(self._default_preview())
-            self._preview.setToolTip(self._default_preview())
             self._preview.setAccessibleName("")
             style_name = "Muted"
+        if self._preview.toolTip():
+            self._preview.setToolTip("")
         if self._preview.objectName() != style_name:
             self._preview.setObjectName(style_name)
             self._preview.style().unpolish(self._preview)

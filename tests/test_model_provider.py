@@ -132,6 +132,68 @@ class ModelProviderTests(unittest.TestCase):
         self.assertEqual(probe.timeout_seconds, 15)
         self.assertEqual(probe.reasoning_effort, "none")
 
+    def test_openai_empty_or_truncated_result_retries_with_larger_budget(self) -> None:
+        settings = ProviderSettings(
+            "openai_chat",
+            "https://models.example/v1",
+            "deepseek-flash",
+            max_output_tokens=512,
+        ).validated()
+        provider = OpenAICompatibleProvider(settings, "secret")
+        budgets: list[int] = []
+
+        def fake_urlopen(request: object, timeout: int) -> _Response:
+            payload = json.loads(request.data.decode("utf-8"))  # type: ignore[attr-defined]
+            budgets.append(payload["max_tokens"])
+            if len(budgets) == 1:
+                return _Response(
+                    {
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": "",
+                                    "reasoning_content": "先分析问题",
+                                },
+                                "finish_reason": "length",
+                            }
+                        ]
+                    }
+                )
+            return _Response(
+                {"choices": [{"message": {"content": "可以正常回复"}, "finish_reason": "stop"}]}
+            )
+
+        with patch("server.model_provider.URL_OPENER.open", fake_urlopen):
+            result = asyncio.run(provider.generate("system", "user"))
+        self.assertEqual(result, "可以正常回复")
+        self.assertEqual(budgets, [512, 2048])
+
+    def test_openai_content_blocks_are_flattened(self) -> None:
+        settings = ProviderSettings(
+            "openai_chat", "https://models.example/v1", "model"
+        ).validated()
+        provider = OpenAICompatibleProvider(settings, "secret")
+
+        def fake_urlopen(_request: object, timeout: int) -> _Response:
+            return _Response(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": [
+                                    {"type": "text", "text": "第一段"},
+                                    {"type": "text", "text": "第二段"},
+                                ]
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ]
+                }
+            )
+
+        with patch("server.model_provider.URL_OPENER.open", fake_urlopen):
+            self.assertEqual(asyncio.run(provider.generate("system", "user")), "第一段\n第二段")
+
     def test_extra_parameters_cannot_override_protocol_fields(self) -> None:
         with self.assertRaises(ValueError):
             ProviderSettings(

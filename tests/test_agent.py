@@ -10,6 +10,7 @@ from typing import Any
 from server.agent import AgentService
 from server.config import Config
 from server.database import Database
+from server.model_provider import AgentUnavailable
 
 
 class FakeProvider:
@@ -45,6 +46,54 @@ class AgentTests(unittest.TestCase):
 
     def test_running_agent_keeps_provider_snapshot_during_reconfigure(self) -> None:
         asyncio.run(self._provider_snapshot_scenario())
+
+    def test_chunked_summary_survives_one_empty_segment(self) -> None:
+        asyncio.run(self._chunk_failure_scenario())
+
+    async def _chunk_failure_scenario(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            database = Database(root / "chat.sqlite3", root / "uploads")
+            database.initialize()
+            owner = database.register_user("owner", "password-owner")
+            group = database.create_group("分段测试群", owner["id"])
+            database.save_message("group", str(group["id"]), owner["id"], "owner", "text", "甲" * 7000)
+            database.save_message("group", str(group["id"]), owner["id"], "owner", "text", "乙" * 7000)
+            config = replace(
+                Config.from_env(),
+                data_dir=root,
+                database_path=root / "chat.sqlite3",
+                uploads_dir=root / "uploads",
+                agent_timeout_seconds=2,
+            )
+
+            async def emit(*_args: object) -> None:
+                return None
+
+            class FlakyProvider:
+                def __init__(self) -> None:
+                    self.calls = 0
+
+                async def health(self) -> bool:
+                    return True
+
+                async def generate(self, system_prompt: str, user_prompt: str) -> str:
+                    self.calls += 1
+                    if self.calls == 1:
+                        raise AgentUnavailable("模型返回了空结果", "invalid_response")
+                    if self.calls == 2:
+                        return "第二段包含结论"
+                    return "合并后的总结"
+
+            service = AgentService(config, database, emit)
+            provider = FlakyProvider()
+            service.provider = provider  # type: ignore[assignment]
+            await service.invoke(owner["id"], "group", str(group["id"]), "总结最近50条消息")
+
+            history = database.recent_history(owner["id"], "group", str(group["id"]), 10)
+            self.assertEqual(history[-1]["sender_kind"], "agent")
+            self.assertIn("合并后的总结", history[-1]["content"])
+            self.assertEqual(provider.calls, 3)
 
     async def _provider_snapshot_scenario(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

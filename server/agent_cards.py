@@ -229,6 +229,17 @@ def extract_json_object(source: str) -> dict[str, Any] | None:
         try:
             value = json.loads(clean[start : end + 1])
         except (TypeError, ValueError):
+            # Some providers append a second object or trailing commentary even
+            # when JSON mode is requested. Decode the first complete object and
+            # leave the rest untouched instead of discarding the whole answer.
+            decoder = json.JSONDecoder()
+            for match in re.finditer(r"\{", clean):
+                try:
+                    candidate, _end = decoder.raw_decode(clean[match.start() :])
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(candidate, dict):
+                    return candidate
             return None
     return value if isinstance(value, dict) else None
 

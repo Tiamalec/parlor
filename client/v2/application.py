@@ -1149,6 +1149,7 @@ class ChatPane(QWidget):
             return
         self._stop_private_typing()
         self._peer_typing_timer.stop()
+        self.profile_popover.hide()
         if self.key and self.key.kind == "private":
             self.store.state.private_typing[self.key] = False
         self._flush_current_draft()
@@ -1300,16 +1301,22 @@ class ChatPane(QWidget):
             )
             if member:
                 fallback.update(member)
-        profile = self.service.profile(None if is_agent else sender_id, fallback)
+        profile = self.service.profile(
+            None if is_agent else sender_id,
+            fallback,
+            self.key.identifier if self.key and self.key.kind == "group" else None,
+        )
         if grouped:
             avatar: QWidget = QWidget()
             avatar.setObjectName("AvatarPlaceholder")
             avatar.setFixedSize(36, 1)
         else:
-            profile_avatar = UserAvatar(self.service, profile, 36, clickable=True)
+            # Open profiles on click only. Hover popovers grab the pointer on
+            # Windows and swallow the first right-click context menu.
+            profile_avatar = UserAvatar(
+                self.service, profile, 36, clickable=True, hoverable=False
+            )
             profile_avatar.activated.connect(self._show_message_profile)
-            profile_avatar.profile_hovered.connect(self._hover_message_profile)
-            profile_avatar.hover_left.connect(lambda _profile: self.profile_popover.schedule_hide())
             profile_avatar.context_requested.connect(self._show_avatar_menu)
             avatar = profile_avatar
 
@@ -2034,9 +2041,6 @@ class ChatPane(QWidget):
     def _show_message_profile(self, profile: object, anchor: QWidget) -> None:
         self.profile_popover.show_for(anchor, profile, pinned=True)
 
-    def _hover_message_profile(self, profile: object, anchor: QWidget) -> None:
-        self.profile_popover.show_for(anchor, profile)
-
     def _profile_member(self, profile: object) -> dict[str, Any] | None:
         if not self.key or self.key.kind != "group":
             return None
@@ -2313,8 +2317,12 @@ class ChatPane(QWidget):
             item.setSizeHint(QSize(0, 44))
             item.setData(Qt.ItemDataRole.UserRole, dict(member))
             is_agent = member.get("kind") == "agent"
-            profile = self.service.profile(None if is_agent else int(member.get("id", 0) or 0), member)
-            avatar = UserAvatar(self.service, profile, 30)
+            profile = self.service.profile(
+                None if is_agent else int(member.get("id", 0) or 0),
+                member,
+                self.key.identifier if self.key else None,
+            )
+            avatar = UserAvatar(self.service, profile, 30, hoverable=False)
             item.setIcon(QIcon(avatar.pixmap()))
             if is_agent:
                 item.setText(f"{member.get('username') or member.get('display_name') or 'AI Agent'}  ·  智能助手")
@@ -2636,7 +2644,7 @@ class ContactsPage(QWidget):
             if not isinstance(user, dict):
                 continue
             profile = self.service.profile(int(user.get("id", 0) or 0), user)
-            avatar = UserAvatar(self.service, profile, 32)
+            avatar = UserAvatar(self.service, profile, 32, hoverable=False)
             item.setIcon(QIcon(avatar.pixmap()))
 
     def _filter_directory(self, keyword: str) -> None:
@@ -2659,7 +2667,7 @@ class ContactsPage(QWidget):
             item = QListWidgetItem(f"{profile.display_name}\n{status}")
             item.setSizeHint(QSize(0, 52))
             item.setData(Qt.ItemDataRole.UserRole, dict(user))
-            avatar = UserAvatar(self.service, profile, 32)
+            avatar = UserAvatar(self.service, profile, 32, hoverable=False)
             item.setIcon(QIcon(avatar.pixmap()))
             item.setToolTip(status)
             self.users.addItem(item)

@@ -474,15 +474,24 @@ class AgentService:
             "search": "请提取该段与搜索词相关的信息，不要补充原文没有的信息。",
         }
         partials: list[str] = []
+        partial_errors: list[Exception] = []
         for index, chunk in enumerate(chunks, start=1):
-            partials.append(
-                await self._generate_once(
-                    task_type,
-                    f"这是第 {index}/{len(chunks)} 段。{chunk_instructions[task_type]}",
-                    chunk,
+            try:
+                partials.append(
+                    await self._generate_once(
+                        task_type,
+                        f"这是第 {index}/{len(chunks)} 段。{chunk_instructions[task_type]}",
+                        chunk,
+                    )
                 )
-            )
+            except (AgentUnavailable, asyncio.TimeoutError) as exc:
+                partial_errors.append(exc)
+                LOGGER.warning("Agent 分段处理失败（第 %s/%s 段）：%s", index, len(chunks), exc)
+        if not partials:
+            raise partial_errors[0]
         combined = "\n\n".join(f"分段摘要 {index}:\n{text}" for index, text in enumerate(partials, start=1))
+        if partial_errors:
+            combined += f"\n\n注意：{len(partial_errors)} 个分段未能处理，总结时不要编造这些分段的内容。"
         return await self._generate_once(
             task_type,
             f"请合并以下分段结果完成最终任务，并去除重复或相互矛盾的内容：{instruction}",
@@ -1029,8 +1038,10 @@ class AgentService:
                 },
             )
         except Exception as exc:
+            reachable_but_invalid = isinstance(exc, AgentUnavailable) and exc.category == "invalid_response"
             self._update_online_for_runtime(
-                not isinstance(exc, (AgentUnavailable, asyncio.TimeoutError))
+                reachable_but_invalid
+                or not isinstance(exc, (AgentUnavailable, asyncio.TimeoutError))
             )
             await asyncio.to_thread(self.database.finish_agent_run, run_id, "failed", error=str(exc))
             await self.emit(

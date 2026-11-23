@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from PySide6.QtCore import Qt, Signal
@@ -58,7 +59,8 @@ class MemberRow(QFrame):
         is_agent = member.get("kind") == "agent"
         user_id = None if is_agent else int(member.get("id", 0) or 0)
         self.profile = service.profile(user_id, member)
-        self.avatar = UserAvatar(service, self.profile, 36, clickable=True)
+        # Click opens the profile card; hovering must not capture the right-click.
+        self.avatar = UserAvatar(service, self.profile, 36, clickable=True, hoverable=False)
         self.avatar.activated.connect(lambda _profile, _anchor: self.activated.emit(self.member, self.avatar))
         row.addWidget(self.avatar)
         labels = QVBoxLayout()
@@ -66,7 +68,6 @@ class MemberRow(QFrame):
         name = QLabel(self.profile.display_name)
         name.setObjectName("MemberName")
         name.setWordWrap(True)
-        name.setToolTip(name.text())
         state = "在线" if member.get("online") else "离线"
         if member.get("muted"):
             state = "已禁言"
@@ -113,8 +114,16 @@ class MemberListSection(QWidget):
         self.rows.setSpacing(2)
         layout.addLayout(self.rows)
         self.agent_model = ""
+        self._members_signature: tuple[str, str] | None = None
 
     def set_members(self, members: list[dict[str, Any]], state: AppState) -> None:
+        signature = (
+            str(state.agent_model or ""),
+            json.dumps(members, ensure_ascii=False, sort_keys=True, default=str),
+        )
+        if signature == self._members_signature:
+            return
+        self._members_signature = signature
         self.popover.hide()
         while self.rows.count():
             item = self.rows.takeAt(0)
@@ -136,10 +145,6 @@ class MemberListSection(QWidget):
         for member in ordered:
             row = MemberRow(member, self.service)
             row.activated.connect(self._open_member)
-            row.avatar.profile_hovered.connect(
-                lambda _profile, anchor, value=dict(member): self._hover_member(value, anchor)
-            )
-            row.avatar.hover_left.connect(self._hover_left)
             row.avatar.context_requested.connect(
                 lambda _profile, anchor, value=dict(member): self._member_menu(value, anchor)
             )
@@ -152,12 +157,6 @@ class MemberListSection(QWidget):
             enriched["agent_model"] = self.agent_model
         user_id = None if is_agent else int(member.get("id", 0) or 0)
         return self.service.profile(user_id, enriched)
-
-    def _hover_member(self, member: dict[str, Any], anchor: QWidget) -> None:
-        self.popover.show_for(anchor, self._profile_for(member))
-
-    def _hover_left(self, _profile: object) -> None:
-        self.popover.schedule_hide()
 
     def _member_menu(self, member: dict[str, Any], anchor: QWidget) -> None:
         self.popover.hide()
@@ -388,7 +387,7 @@ class GroupAgentSettings(QWidget):
         row.setObjectName("SettingsRow")
         layout = QHBoxLayout(row)
         layout.setContentsMargins(8, 6, 8, 6)
-        avatar = UserAvatar(self.service, self.service.profile(None, agent), 30)
+        avatar = UserAvatar(self.service, self.service.profile(None, agent), 30, hoverable=False)
         labels = QVBoxLayout()
         labels.setSpacing(1)
         name = QLabel(str(agent.get("name") or "Agent"))
@@ -559,6 +558,8 @@ class ConversationDetailsPanel(QFrame):
             members = state.members_by_group.get(key.identifier, state.members)
             humans = sum(member.get("kind") != "agent" for member in members)
             self.meta.setText(f"群聊 · {humans} 位成员")
+            if changed_group:
+                self.members.popover.hide()
             self.members.set_members(members, state)
             own_id = str(state.current_user.get("id", ""))
             own = next((member for member in members if str(member.get("id")) == own_id), None)

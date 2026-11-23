@@ -176,8 +176,13 @@ class ChatService:
             self._avatar_requests[key] = now
         return request_id
 
-    def profile(self, user_id: int | None, fallback: dict[str, Any] | None = None) -> ProfileViewModel:
-        return resolve_profile(self.store.state, user_id, fallback)
+    def profile(
+        self,
+        user_id: int | None,
+        fallback: dict[str, Any] | None = None,
+        group_id: str | None = None,
+    ) -> ProfileViewModel:
+        return resolve_profile(self.store.state, user_id, fallback, group_id)
 
     def avatar_data(self, profile: ProfileViewModel) -> str | None:
         if profile.kind == "agent":

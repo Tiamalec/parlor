@@ -40,6 +40,7 @@ def resolve_profile(
     state: AppState,
     user_id: int | None,
     fallback: dict[str, Any] | None = None,
+    group_id: str | None = None,
 ) -> ProfileViewModel:
     """Merge identity records by stable user ID while preserving the newest avatar."""
     fallback = dict(fallback or {})
@@ -69,8 +70,20 @@ def resolve_profile(
     if _same_user(state.current_user, user_id):
         sources.append(state.current_user)
     sources.extend(item for item in state.users if _same_user(item, user_id))
-    for members in state.members_by_group.values():
-        sources.extend(item for item in members if item.get("kind") != "agent" and _same_user(item, user_id))
+    group_scoped_keys = {"group_role", "nickname", "muted", "available_actions"}
+    for member_group_id, members in state.members_by_group.items():
+        for item in members:
+            if item.get("kind") == "agent" or not _same_user(item, user_id):
+                continue
+            # Identity fields stay global so a user missing from the contact
+            # list still has a name and avatar. Roles, nicknames and moderation
+            # state only belong to the group currently being viewed.
+            if group_id is not None and str(member_group_id) == str(group_id):
+                sources.append(item)
+            else:
+                sources.append(
+                    {key: value for key, value in item.items() if key not in group_scoped_keys}
+                )
     sources.append(fallback)
 
     merged: dict[str, Any] = {"id": user_id}

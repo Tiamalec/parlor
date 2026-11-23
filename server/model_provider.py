@@ -10,6 +10,7 @@ from typing import Any, Protocol
 from urllib.parse import quote, urlsplit
 
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+MAX_RETRY_OUTPUT_TOKENS = 8192
 SUPPORTED_PROTOCOLS = {"openai_chat", "ollama_native", "gemini_native"}
 SUPPORTED_AUTH_TYPES = {"none", "bearer", "x-api-key", "x-goog-api-key"}
 RESERVED_EXTRA_KEYS = {"model", "messages", "stream", "contents", "system_instruction", "generationConfig", "options", "authorization", "api_key"}
@@ -39,6 +40,36 @@ def validate_api_key(value: str) -> str:
     if len(key) > 4096 or any(ord(char) < 32 or ord(char) == 127 for char in key):
         raise ValueError("API Key 格式无效")
     return key
+
+
+def text_from_content(value: Any) -> str:
+    """Flatten OpenAI-style content blocks without losing usable text."""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                cleaned = item.strip()
+            elif isinstance(item, dict):
+                cleaned = next(
+                    (
+                        str(item[key]).strip()
+                        for key in ("text", "content", "value")
+                        if isinstance(item.get(key), str) and str(item[key]).strip()
+                    ),
+                    "",
+                )
+            else:
+                cleaned = ""
+            if cleaned:
+                parts.append(cleaned)
+        return "\n".join(parts).strip()
+    if isinstance(value, dict):
+        for key in ("text", "content", "value"):
+            if isinstance(value.get(key), str) and str(value[key]).strip():
+                return str(value[key]).strip()
+    return ""
 
 
 @dataclass(frozen=True)
@@ -195,14 +226,41 @@ class OpenAIChatAdapter(_JsonHttpProvider):
         payload.update({"model": self.settings.model, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}], "temperature": self.settings.temperature, "max_tokens": self.settings.max_output_tokens, "stream": False})
         if self.settings.reasoning_effort and self.settings.reasoning_effort != "none":
             payload["reasoning_effort"] = self.settings.reasoning_effort
-        result = await asyncio.to_thread(self._request_json, "POST", "/chat/completions", payload)
-        try:
-            content = result["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise AgentUnavailable("模型返回格式无效", "invalid_response") from exc
-        if not isinstance(content, str) or not content.strip():
-            raise AgentUnavailable("模型返回了空结果", "invalid_response")
-        return content.strip()
+        budget = self.settings.max_output_tokens
+        budgets = [budget]
+        expanded = min(MAX_RETRY_OUTPUT_TOKENS, max(2048, budget * 4))
+        if expanded > budget:
+            budgets.append(expanded)
+        if expanded < MAX_RETRY_OUTPUT_TOKENS:
+            budgets.append(MAX_RETRY_OUTPUT_TOKENS)
+        best = ""
+        for attempt, attempt_budget in enumerate(budgets):
+            attempt_payload = dict(payload)
+            attempt_payload["max_tokens"] = attempt_budget
+            result = await asyncio.to_thread(
+                self._request_json, "POST", "/chat/completions", attempt_payload
+            )
+            try:
+                choices = result["choices"]
+                choice = choices[0]
+                message = choice["message"]
+            except (KeyError, IndexError, TypeError) as exc:
+                raise AgentUnavailable("模型返回格式无效", "invalid_response") from exc
+            content = text_from_content(message.get("content"))
+            finish_reason = str(choice.get("finish_reason") or "")
+            if len(content) > len(best):
+                best = content
+            if content and finish_reason != "length":
+                return content
+            last_attempt = attempt == len(budgets) - 1
+            if last_attempt:
+                break
+        if best:
+            # A truncated answer is still more useful than dropping the reply
+            # entirely; structured tasks will surface their parse state to the
+            # client and can be regenerated.
+            return best
+        raise AgentUnavailable("模型返回了空结果", "invalid_response")
 
 
 @dataclass

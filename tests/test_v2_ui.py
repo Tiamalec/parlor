@@ -1231,6 +1231,7 @@ class V2UiTests(unittest.TestCase):
         first_row = pane.details.members.rows.itemAt(0).widget()
         self.assertIsInstance(first_row, MemberRow)
         self.assertEqual(first_row.member["group_role"], "owner")
+        self.assertEqual(first_row.profile.group_role, "owner")
         self.assertIsNotNone(first_row.profile.image_data)
         first_row.activated.emit(first_row.member, first_row.avatar)
         self.app.processEvents()
@@ -1264,12 +1265,78 @@ class V2UiTests(unittest.TestCase):
             },
             avatar_cache={2: {"user_id": 2, "avatar_version": 3, "image_data": "image"}},
         )
-        profile = resolve_profile(state, 2, state.members_by_group["7"][0])
+        profile = resolve_profile(state, 2, state.members_by_group["7"][0], group_id="7")
         self.assertEqual(profile.user_id, 2)
         self.assertEqual(profile.avatar_version, 3)
         self.assertEqual(profile.image_data, "image")
         self.assertEqual(profile.group_role, "owner")
         self.assertEqual(profile.available_actions, ("mute",))
+
+    def test_private_and_global_profile_do_not_inherit_group_owner_role(self) -> None:
+        from client.models import AppState
+        from client.profile import resolve_profile
+        from client.v2.profile_widgets import profile_role
+
+        state = AppState(
+            users=[{"id": 2, "username": "user2", "display_name": "User 2", "role": "user"}],
+            members_by_group={
+                "7": [{"id": 2, "username": "user2", "group_role": "owner"}]
+            },
+        )
+        private_profile = resolve_profile(
+            state, 2, {"id": 2, "username": "user2", "kind": "user"}
+        )
+        self.assertEqual(private_profile.group_role, "")
+        self.assertEqual(profile_role(private_profile), "联系人")
+
+        group_profile = resolve_profile(
+            state,
+            2,
+            {"id": 2, "username": "user2", "group_role": "owner"},
+            group_id="7",
+        )
+        self.assertEqual(group_profile.group_role, "owner")
+        self.assertEqual(profile_role(group_profile), "群主")
+
+    def test_private_chat_avatar_profile_card_does_not_show_group_owner(self) -> None:
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import ChatPane
+        from client.v2.widgets import UserAvatar
+
+        store = AppStore()
+        store.state.current_user = {"id": 1, "username": "alice"}
+        store.state.users = [{"id": 2, "username": "user2", "display_name": "User 2"}]
+        store.state.members_by_group["7"] = [
+            {"id": 2, "username": "user2", "display_name": "User 2", "group_role": "owner"}
+        ]
+        key = ConversationKey("private", "dm:1:2")
+        store.state.conversations = [ConversationSummary(key, "User 2")]
+        store.state.messages[key] = [
+            {
+                "id": 5,
+                "conversation_type": "private",
+                "conversation_id": key.identifier,
+                "sender_id": 2,
+                "sender_name": "User 2",
+                "message_type": "text",
+                "content": "你好",
+            }
+        ]
+        service = ChatService(NetworkClient("127.0.0.1", 9), store)
+        pane = ChatPane(service, store)
+        pane.resize(900, 600)
+        pane.set_conversation(key, "User 2")
+        pane.show()
+        self.app.processEvents()
+
+        avatar = pane.findChildren(UserAvatar)[0]
+        self.assertEqual(avatar.profile.group_role, "")
+        pane.profile_popover.show_for(avatar, avatar.profile, pinned=True)
+        self.app.processEvents()
+        self.assertEqual(pane.profile_popover.card.role.text(), "联系人")
+        pane.close()
 
     def test_profile_popover_scrolls_long_bio_and_avatar_menu_mentions(self) -> None:
         from client.network import NetworkClient
@@ -1329,6 +1396,82 @@ class V2UiTests(unittest.TestCase):
         pane._insert_profile_mention(avatar.profile)
         self.assertEqual(pane.compose.mentions()[0]["member_id"], "user:2")
         pane.close()
+
+    def test_chat_switches_do_not_leave_avatar_tooltips_or_rebuild_members(self) -> None:
+        from client.models import AppState
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import ChatPane
+        from client.v2.details import MemberListSection
+        from client.v2.widgets import ConversationCard, UserAvatar
+
+        store = AppStore()
+        store.state.current_user = {"id": 1, "username": "alice"}
+        key = ConversationKey("group", "7")
+        store.state.members_by_group["7"] = [
+            {"id": 2, "member_id": "user:2", "kind": "user", "username": "bob", "display_name": "小博"}
+        ]
+        store.state.messages[key] = [
+            {
+                "id": 1,
+                "conversation_type": "group",
+                "conversation_id": "7",
+                "sender_id": 2,
+                "sender_name": "小博",
+                "message_type": "text",
+                "content": "切换会话时不要闪出小窗口",
+            }
+        ]
+        service = ChatService(NetworkClient("127.0.0.1", 9), store)
+        pane = ChatPane(service, store)
+        pane.resize(900, 600)
+        pane.set_conversation(key, "项目组")
+        pane.show()
+        self.app.processEvents()
+
+        avatars = pane.findChildren(UserAvatar)
+        self.assertTrue(avatars)
+        self.assertEqual(avatars[0].toolTip(), "")
+        self.assertEqual(avatars[0].accessibleName(), avatars[0].profile.display_name)
+        self.assertFalse(avatars[0].hoverable)
+        pane.profile_popover.show_for(avatars[0], avatars[0].profile, pinned=True)
+        self.app.processEvents()
+        self.assertTrue(pane.profile_popover.isVisible())
+        pane.set_conversation(ConversationKey("group", "8"), "另一个群")
+        self.app.processEvents()
+        self.assertFalse(pane.profile_popover.isVisible())
+
+        short = ConversationCard(ConversationSummary(key, "短标题"))
+        short.show()
+        self.app.processEvents()
+        short.setFixedWidth(260)
+        self.app.processEvents()
+        self.assertEqual(short._title.toolTip(), "")
+        long_title = "这是一个会被截断的很长很长的群聊标题用于验证提示只在必要时出现"
+        long_card = ConversationCard(ConversationSummary(key, long_title))
+        long_card.show()
+        self.app.processEvents()
+        long_card.setFixedWidth(260)
+        self.app.processEvents()
+        self.assertEqual(long_card._title.toolTip(), long_title)
+
+        state = AppState()
+        state.agent_model = "deepseek-flash"
+        state.members_by_group["7"] = [dict(store.state.members_by_group["7"][0])]
+        section = MemberListSection(service)
+        section.show()
+        section.set_members(state.members_by_group["7"], state)
+        self.app.processEvents()
+        first_row = section.rows.itemAt(0).widget()
+        section.popover.show_for(first_row.avatar, first_row.profile, pinned=True)
+        self.app.processEvents()
+        self.assertTrue(section.popover.isVisible())
+        section.set_members([dict(state.members_by_group["7"][0])], state)
+        self.assertIs(section.rows.itemAt(0).widget(), first_row)
+        self.assertTrue(section.popover.isVisible())
+        pane.close()
+        section.close()
 
     def test_contacts_use_selection_details_and_semantic_group_actions(self) -> None:
         from client.network import NetworkClient

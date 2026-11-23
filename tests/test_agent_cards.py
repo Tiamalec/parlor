@@ -56,6 +56,16 @@ class AgentCardParsingTests(unittest.TestCase):
         self.assertTrue(prefixed["parse_error"])
         self.assertNotIn('"overview"', prefixed_content)
 
+    def test_first_complete_json_object_survives_trailing_output(self) -> None:
+        card, _ = build_agent_card(
+            "summary",
+            '{"overview": "结论已确认", "conclusions": [], "pending": []}\n'
+            '补充说明：这是一个多余的第二个对象 {"unused": true}',
+            self.messages,
+        )
+        self.assertFalse(card["parse_error"])
+        self.assertEqual(card["overview"], "结论已确认")
+
     def test_near_duplicate_settled_and_open_items_keep_only_the_open_question(self) -> None:
         card, _ = build_agent_card(
             "summary",
