@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import Mock
 
 from client.models import ConversationKey
 from client.store import AppStore
@@ -89,6 +90,61 @@ class ClientStoreTests(unittest.TestCase):
         records = self.store.state.messages[ConversationKey("group", "7")]
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["content"], "更新版")
+
+    def test_private_open_state_receipt_and_typing(self) -> None:
+        key = ConversationKey("private", "dm:1:2")
+        self.store.handle_event({"type": "private.opened", "payload": {"conversation": {
+            "conversation_type": "private", "conversation_id": key.identifier,
+            "title": "bob", "can_send": True,
+        }}})
+        self.assertEqual(self.store.state.conversations[0].key, key)
+        self.store.handle_event({"type": "conversation.list", "payload": {"conversations": []}})
+        self.assertEqual(self.store.state.conversations[0].key, key)
+        self.store.handle_event({"type": "private.state", "payload": {
+            "conversation_id": key.identifier, "can_send": False, "blocked_by_me": True,
+        }})
+        self.assertFalse(self.store.state.conversations[0].can_send)
+        self.assertTrue(self.store.state.conversations[0].blocked_by_me)
+        self.store.handle_event({"type": "private.typing", "payload": {
+            "conversation_id": key.identifier, "user_id": 2, "active": True,
+        }})
+        self.assertTrue(self.store.state.private_typing[key])
+        self.store.handle_event({"type": "private.read", "payload": {
+            "conversation_id": key.identifier, "reader_id": 2, "message_id": 18,
+        }})
+        self.assertEqual(self.store.state.conversations[0].peer_last_read_message_id, 18)
+        self.store.handle_event({"type": "conversation.list", "payload": {"conversations": [{
+            "conversation_type": "private", "conversation_id": key.identifier,
+            "title": "bob", "peer_last_read_message_id": 18,
+        }]}})
+        self.assertFalse(self.store.state.conversations[0].can_send)
+
+    def test_private_outbox_reconciliation_requires_manual_retry(self) -> None:
+        key = ConversationKey("private", "dm:1:2")
+        self.store.state.private_outbox["send-1"] = {"key": key, "payload": {"content": "hello"}, "status": "sending"}
+        self.store.handle_event({"type": "network.disconnected", "payload": {}})
+        self.assertEqual(self.store.state.private_outbox["send-1"]["status"], "uncertain")
+        self.store.handle_event({"type": "message.status", "payload": {
+            "client_request_id": "send-1", "found": False,
+        }})
+        self.assertEqual(self.store.state.private_outbox["send-1"]["status"], "retry_ready")
+        self.store.handle_event({"type": "ack", "request_id": "send-1", "payload": {"action": "message.send"}})
+        self.assertNotIn("send-1", self.store.state.private_outbox)
+
+    def test_private_retry_reuses_original_request_id(self) -> None:
+        from client.service import ChatService
+
+        network = Mock()
+        network.send.side_effect = lambda _event, _payload, request_id=None: request_id or "send-1"
+        service = ChatService(network, self.store)
+        self.store.state.capabilities["private_chat_v2"] = True
+        key = ConversationKey("private", "dm:1:2")
+        self.assertEqual(service.send_text(key, "hello"), "send-1")
+        record = self.store.state.private_outbox["send-1"]
+        record["status"] = "retry_ready"
+        self.assertEqual(service.retry_private_send("send-1"), "send-1")
+        self.assertEqual(record["status"], "sending")
+        self.assertEqual(network.send.call_args.kwargs["request_id"], "send-1")
 
     def test_search_results_do_not_pollute_timeline(self) -> None:
         key = ConversationKey("group", "7")

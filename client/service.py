@@ -24,9 +24,9 @@ class ChatService:
         self._member_requests: dict[str, str] = {}
         self._group_agent_requests: dict[str, str] = {}
 
-    def request(self, event_type: str, payload: dict[str, Any] | None = None) -> str | None:
+    def request(self, event_type: str, payload: dict[str, Any] | None = None, *, request_id: str | None = None) -> str | None:
         try:
-            request_id = self.network.send(event_type, payload or {})
+            request_id = self.network.send(event_type, payload or {}, request_id=request_id)
         except (ConnectionError, ValueError) as exc:
             self.store.state.last_error = str(exc)
             self.store.notify("error")
@@ -95,6 +95,8 @@ class ChatService:
         """
         if self.store.state.current_conversation != key:
             self.store.select_conversation(key)
+        if key.kind == "private" and self.store.state.capabilities.get("private_chat_v2"):
+            self.request("private.open", {"target_user_id": self._private_peer_id(key)})
         history_requested = False
         if (
             self._live_request(self._history_requests, key) is None
@@ -146,6 +148,9 @@ class ChatService:
         request_id = self.request("message.send", payload)
         if request_id:
             self.store.state.pending_sends[request_id] = (key, content, mentions or [], reply_to_id)
+            if key.kind == "private" and self.store.state.capabilities.get("private_chat_v2"):
+                self.store.state.private_outbox[request_id] = {"key": key, "payload": payload, "status": "sending"}
+                self.store.notify("private_outbox")
         return request_id
 
     def set_avatar(self, mime: str | None = None, encoded: str = "") -> str | None:
@@ -205,7 +210,7 @@ class ChatService:
                 "size": size,
             }
         )
-        return self.request("message.send", payload)
+        return self._send_message_payload(key, payload)
 
     def send_sticker(
         self,
@@ -231,7 +236,44 @@ class ChatService:
                 "reply_to_id": reply_to_id,
             }
         )
-        return self.request("message.send", payload)
+        return self._send_message_payload(key, payload)
+
+    def _send_message_payload(self, key: ConversationKey, payload: dict[str, Any]) -> str | None:
+        request_id = self.request("message.send", payload)
+        if request_id and key.kind == "private" and self.store.state.capabilities.get("private_chat_v2"):
+            self.store.state.private_outbox[request_id] = {"key": key, "payload": payload, "status": "sending"}
+            self.store.notify("private_outbox")
+        return request_id
+
+    def set_private_block(self, key: ConversationKey, blocked: bool) -> str | None:
+        return self.request("private.block.set", {"target_user_id": self._private_peer_id(key), "blocked": blocked})
+
+    def _private_peer_id(self, key: ConversationKey) -> int:
+        parts = key.identifier.split(":")
+        if len(parts) == 3 and parts[0] == "dm":
+            own_id = int(self.store.state.current_user["id"])
+            return int(parts[2]) if int(parts[1]) == own_id else int(parts[1])
+        return int(key.identifier)
+
+    def set_private_typing(self, key: ConversationKey, active: bool) -> str | None:
+        if not self.store.state.capabilities.get("private_chat_v2"):
+            return None
+        return self.request("private.typing", {"conversation_id": key.identifier, "active": active})
+
+    def reconcile_private_sends(self) -> None:
+        for request_id, record in tuple(self.store.state.private_outbox.items()):
+            if record.get("status") == "uncertain":
+                self.request("message.status", {"client_request_id": request_id})
+
+    def retry_private_send(self, request_id: str) -> str | None:
+        record = self.store.state.private_outbox.get(request_id)
+        if not record or record.get("status") != "retry_ready":
+            return None
+        sent = self.request("message.send", record["payload"], request_id=request_id)
+        if sent:
+            record["status"] = "sending"
+            self.store.notify("private_outbox")
+        return sent
 
     def search(self, key: ConversationKey, keyword: str, before_id: int | None = None) -> str | None:
         payload = self.scope(key)

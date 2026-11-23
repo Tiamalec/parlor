@@ -238,7 +238,11 @@ class ChatServer:
                 "group.members": self._group_members,
                 "group.nickname.set": self._group_nickname_set,
                 "conversation.list": self._conversation_list,
+                "private.open": self._private_open,
+                "private.block.set": self._private_block_set,
+                "private.typing": self._private_typing,
                 "message.send": self._message_send,
+                "message.status": self._message_status,
                 "message.edit": self._message_edit,
                 "message.recall": self._message_recall,
                 "media.get": self._media_get,
@@ -344,6 +348,7 @@ class ChatServer:
             "agent_online": self.agent.enabled and self.agent.online,
             "capabilities": {
                 "conversation_list": True,
+                "private_chat_v2": True,
                 "history_pagination": True,
                 "media_get": True,
                 "avatar_profiles": True,
@@ -536,6 +541,43 @@ class ChatServer:
             "conversation.list", {"conversations": conversations}, request_id=request_id
         )
 
+    async def _private_open(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        conversation = await asyncio.to_thread(
+            self.database.open_private, int(session.user["id"]), int(payload["target_user_id"])
+        )
+        await session.send("private.opened", {"conversation": conversation}, request_id=request_id)
+
+    async def _private_block_set(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        if type(payload.get("blocked")) is not bool:
+            raise DatabaseError("屏蔽状态无效")
+        user_id = int(session.user["id"])
+        peer_id = int(payload["target_user_id"])
+        own_state = await asyncio.to_thread(self.database.set_private_block, user_id, peer_id, payload["blocked"])
+        peer_state = await asyncio.to_thread(self.database.private_state, peer_id, user_id)
+        await session.send("ack", {"action": "private.block.set"}, request_id=request_id)
+        await self._send_to_users({user_id}, "private.state", own_state)
+        await self._send_to_users({peer_id}, "private.state", peer_state)
+
+    async def _private_typing(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        if type(payload.get("active")) is not bool:
+            raise DatabaseError("输入状态无效")
+        scope_type, scope_id = await self._resolve_scope(session, {"conversation_type": "private", "conversation_id": payload["conversation_id"]})
+        await asyncio.to_thread(self.database.assert_private_can_send, scope_id)
+        user_id = int(session.user["id"])
+        peer_id = next(participant for participant in dm_participants(scope_id) if participant != user_id)
+        await self._send_to_users({peer_id}, "private.typing", {"conversation_id": scope_id, "user_id": user_id, "active": payload["active"]})
+        await session.send("ack", {"action": "private.typing"}, request_id=request_id)
+
+    async def _message_status(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
+        client_request_id = str(payload.get("client_request_id", "")).strip()
+        if not client_request_id:
+            raise DatabaseError("请求 ID 不能为空")
+        message = await asyncio.to_thread(self.database.get_message_by_request, int(session.user["id"]), client_request_id)
+        result: dict[str, Any] = {"client_request_id": client_request_id, "found": message is not None}
+        if message:
+            result["message_id"] = message["id"]
+        await session.send("message.status", result, request_id=request_id)
+
     async def _message_send(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
         scope_type, scope_id = await self._resolve_scope(session, payload)
         prior = await asyncio.to_thread(self.database.get_message_by_request, int(session.user["id"]), request_id)
@@ -552,6 +594,8 @@ class ChatServer:
             self.database.is_muted, int(scope_id), int(session.user["id"])
         ):
             raise DatabaseError("你已被该群禁言")
+        if scope_type == "private":
+            await asyncio.to_thread(self.database.assert_private_can_send, scope_id)
         reply_to_id = int(payload["reply_to_id"]) if payload.get("reply_to_id") is not None else None
         reply_preview = None
         if reply_to_id is not None:
@@ -611,9 +655,10 @@ class ChatServer:
         if message.get("duplicate"):
             await session.send("ack", {"action": "message.send", "message_id": message["id"], "duplicate": True}, request_id=request_id)
             return
-        await asyncio.to_thread(
-            self.database.set_read_cursor, int(session.user["id"]), scope_type, scope_id, int(message["id"])
-        )
+        if scope_type != "private":
+            await asyncio.to_thread(
+                self.database.set_read_cursor, int(session.user["id"]), scope_type, scope_id, int(message["id"])
+            )
         wire_message = await self._with_image_data(message)
         await self.emit_to_scope(scope_type, scope_id, "message.event", {"message": wire_message})
         await session.send("ack", {"action": "message.send", "message_id": message["id"]}, request_id=request_id)
@@ -745,6 +790,8 @@ class ChatServer:
                 participants = dm_participants(scope_id)
                 if not participants or user_id not in participants:
                     raise DatabaseError("私聊会话无效")
+                peer_id = participants[1] if participants[0] == user_id else participants[0]
+                await asyncio.to_thread(self.database.get_user, peer_id)
                 return scope_type, scope_id
             target_id = int(payload.get("target_user_id") or raw_scope)
             if target_id == user_id:
@@ -857,14 +904,21 @@ class ChatServer:
 
     async def _history_read(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
         scope_type, scope_id = await self._resolve_scope(session, payload)
-        await asyncio.to_thread(
+        message_id = int(payload["message_id"])
+        advanced = await asyncio.to_thread(
             self.database.set_read_cursor,
             int(session.user["id"]),
             scope_type,
             scope_id,
-            int(payload["message_id"]),
+            message_id,
         )
         await session.send("ack", {"action": "history.read"}, request_id=request_id)
+        if advanced and scope_type == "private":
+            await self.emit_to_scope(scope_type, scope_id, "private.read", {
+                "conversation_id": scope_id,
+                "reader_id": int(session.user["id"]),
+                "message_id": message_id,
+            })
 
     async def _message_recall(self, session: ClientSession, payload: dict[str, Any], request_id: str) -> None:
         message = await asyncio.to_thread(self.database.recall_message, int(payload["message_id"]), int(session.user["id"]))
@@ -892,6 +946,8 @@ class ChatServer:
         if not self.agent.enabled:
             raise DatabaseError("Agent 功能当前已禁用")
         scope_type, scope_id = await self._resolve_scope(session, payload)
+        if scope_type == "private":
+            await asyncio.to_thread(self.database.assert_private_can_send, scope_id)
         if scope_type == "group" and await asyncio.to_thread(
             self.database.is_muted, int(scope_id), int(session.user["id"])
         ):

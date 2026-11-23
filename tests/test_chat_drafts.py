@@ -60,6 +60,23 @@ class DraftStoreTests(unittest.TestCase):
             store.flush()
             self.assertEqual(DraftStore(settings).all(), {})
 
+    def test_private_pending_text_survives_restart_and_keeps_request_id(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            settings = QSettings(str(Path(folder) / "drafts.ini"), QSettings.Format.IniFormat)
+            key = ConversationKey("private", "dm:1:2")
+            payload = {"conversation_type": "private", "conversation_id": key.identifier,
+                       "message_type": "text", "content": "first"}
+            store = DraftStore(settings, account="1")
+            store.remember_private_send("send-1", key, payload)
+            store.put(key, Draft.create("newer draft"))
+            store.flush()
+
+            restored = DraftStore(settings, account="1")
+            self.assertEqual(restored.get(key).text, "newer draft")
+            self.assertEqual(restored.pending_private_sends()["send-1"], (key, payload))
+            restored.forget_private_send("send-1")
+            self.assertFalse(DraftStore(settings, account="1").pending_private_sends())
+
 
 @unittest.skipIf(QApplication is None, "PySide6 is not installed")
 class ChatDraftUiTests(unittest.TestCase):
@@ -173,6 +190,27 @@ class ChatDraftUiTests(unittest.TestCase):
         pane.update_state("send_failed", store.state)
         self.assertEqual(pane.compose.toPlainText(), "retry message")
         self.assertEqual(pane.draft_store.get(key).text, "retry message")
+
+    def test_private_pending_text_restores_as_uncertain_without_retyping(self) -> None:
+        from client.network import NetworkClient
+        from client.service import ChatService
+
+        with tempfile.TemporaryDirectory() as folder:
+            settings = QSettings(str(Path(folder) / "drafts.ini"), QSettings.Format.IniFormat)
+            key = ConversationKey("private", "dm:1:2")
+            persisted = DraftStore(settings, account="1")
+            persisted.remember_private_send("send-1", key, {
+                "conversation_type": "private", "conversation_id": key.identifier,
+                "message_type": "text", "content": "needs checking",
+            })
+            store = self._store()
+            store.state.authenticated = True
+            store.state.capabilities["private_chat_v2"] = True
+            pane = self._pane(store, ChatService(NetworkClient("127.0.0.1", 9), store), DraftStore(settings))
+            pane.update_state("auth", store.state)
+            pane.set_conversation(key, "bob")
+            self.assertEqual(store.state.private_outbox["send-1"]["status"], "uncertain")
+            self.assertEqual(pane.compose.toPlainText(), "")
 
     def test_immediate_send_failure_keeps_composer_and_draft(self) -> None:
         from client.network import NetworkClient

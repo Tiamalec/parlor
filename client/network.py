@@ -188,6 +188,7 @@ class NetworkClient:
             finally:
                 was_connected = self._connected.is_set()
                 self._connected.clear()
+                self._fail_queued_requests()
                 with self._socket_lock:
                     sock = self._socket
                     self._socket = None
@@ -243,3 +244,14 @@ class NetworkClient:
                     },
                 )
                 raise
+
+    def _fail_queued_requests(self) -> None:
+        while True:
+            try:
+                message = self._outgoing.get_nowait()
+            except queue.Empty:
+                return
+            self._emit("network.send_failed", {
+                "request_id": message.get("request_id"),
+                "type": message.get("type"),
+            })

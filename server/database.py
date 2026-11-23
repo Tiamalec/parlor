@@ -55,7 +55,8 @@ def dm_participants(conversation_id: str) -> tuple[int, int] | None:
     if len(parts) != 3 or parts[0] != "dm":
         return None
     try:
-        return int(parts[1]), int(parts[2])
+        low, high = int(parts[1]), int(parts[2])
+        return (low, high) if low > 0 and high > 0 and low != high else None
     except ValueError:
         return None
 
@@ -162,6 +163,20 @@ class Database:
                     conversation_id TEXT NOT NULL,
                     last_message_id INTEGER NOT NULL DEFAULT 0,
                     PRIMARY KEY(user_id,conversation_type,conversation_id)
+                );
+                CREATE TABLE IF NOT EXISTS private_conversations (
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    peer_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    opened_at REAL NOT NULL,
+                    PRIMARY KEY(user_id,peer_id),
+                    CHECK(user_id != peer_id)
+                );
+                CREATE TABLE IF NOT EXISTS private_blocks (
+                    blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    blocked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    created_at REAL NOT NULL,
+                    PRIMARY KEY(blocker_id,blocked_id),
+                    CHECK(blocker_id != blocked_id)
                 );
                 CREATE TABLE IF NOT EXISTS mute_rules (
                     group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
@@ -1692,6 +1707,17 @@ class Database:
             card_json = encoded_card if len(encoded_card) <= 32_000 else ""
         now = time.time()
         with self._connect() as conn:
+            if conversation_type == "private":
+                participants = dm_participants(conversation_id)
+                if not participants or (sender_id is not None and sender_id not in participants):
+                    raise DatabaseError("私聊会话无效")
+                conn.execute("BEGIN IMMEDIATE")
+                blocked = conn.execute(
+                    "SELECT 1 FROM private_blocks WHERE (blocker_id=? AND blocked_id=?) OR (blocker_id=? AND blocked_id=?)",
+                    (participants[0], participants[1], participants[1], participants[0]),
+                ).fetchone()
+                if blocked:
+                    raise DatabaseError("当前私聊不可发送")
             cursor = conn.execute(
                 """
                 INSERT OR IGNORE INTO messages(conversation_type,conversation_id,sender_id,sender_agent_id,sender_name,sender_kind,message_type,content_format,card_payload,content,mentions,image_path,image_name,image_mime,sticker_id,sticker_name,sticker_category,sticker_tags,created_at,reply_to_id,reply_preview,client_request_id)
@@ -1729,6 +1755,11 @@ class Database:
                 raise DatabaseError("消息保存失败")
             row = conn.execute("SELECT * FROM messages WHERE id=?", (cursor.lastrowid,)).fetchone()
             event_id = conn.execute("INSERT INTO message_events(message_id,event_type) VALUES(?,'message.event')", (row["id"],)).lastrowid
+            if conversation_type == "private" and conversation_id == dm_conversation_id(*participants):
+                conn.executemany(
+                    "INSERT OR IGNORE INTO private_conversations(user_id,peer_id,opened_at) VALUES(?,?,?)",
+                    [(participants[0], participants[1], now), (participants[1], participants[0], now)],
+                )
         return {**self._message_dict(row), "event_id": event_id}
 
     @staticmethod
@@ -1788,6 +1819,59 @@ class Database:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM messages WHERE sender_id=? AND client_request_id=?", (sender_id, request_id)).fetchone()
         return self._message_dict(row) if row else None
+
+    def private_state(self, user_id: int, peer_id: int) -> dict[str, Any]:
+        if user_id == peer_id:
+            raise DatabaseError("私聊会话无效")
+        self.get_user(peer_id)
+        scope_id = dm_conversation_id(user_id, peer_id)
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT blocker_id FROM private_blocks WHERE (blocker_id=? AND blocked_id=?) OR (blocker_id=? AND blocked_id=?)",
+                (user_id, peer_id, peer_id, user_id),
+            ).fetchall()
+        blockers = {int(row["blocker_id"]) for row in rows}
+        return {"conversation_id": scope_id, "can_send": not blockers, "blocked_by_me": user_id in blockers}
+
+    def open_private(self, user_id: int, peer_id: int) -> dict[str, Any]:
+        if user_id == peer_id:
+            raise DatabaseError("不能与自己私聊")
+        self.get_user(peer_id)
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO private_conversations(user_id,peer_id,opened_at) VALUES(?,?,?)",
+                (user_id, peer_id, time.time()),
+            )
+        return self.list_conversations(user_id, target_scope=dm_conversation_id(user_id, peer_id))[0]
+
+    def set_private_block(self, user_id: int, peer_id: int, blocked: bool) -> dict[str, Any]:
+        if user_id == peer_id:
+            raise DatabaseError("不能屏蔽自己")
+        self.get_user(peer_id)
+        with self._connect() as conn:
+            if blocked:
+                conn.execute(
+                    "INSERT OR IGNORE INTO private_blocks(blocker_id,blocked_id,created_at) VALUES(?,?,?)",
+                    (user_id, peer_id, time.time()),
+                )
+            else:
+                conn.execute(
+                    "DELETE FROM private_blocks WHERE blocker_id=? AND blocked_id=?",
+                    (user_id, peer_id),
+                )
+        return self.private_state(user_id, peer_id)
+
+    def assert_private_can_send(self, conversation_id: str) -> None:
+        participants = dm_participants(conversation_id)
+        if not participants:
+            raise DatabaseError("私聊会话无效")
+        with self._connect() as conn:
+            blocked = conn.execute(
+                "SELECT 1 FROM private_blocks WHERE (blocker_id=? AND blocked_id=?) OR (blocker_id=? AND blocked_id=?)",
+                (participants[0], participants[1], participants[1], participants[0]),
+            ).fetchone()
+        if blocked:
+            raise DatabaseError("当前私聊不可发送")
 
     def _assert_access(self, user_id: int, conversation_type: str, conversation_id: str) -> None:
         if conversation_type == "group":
@@ -1860,7 +1944,7 @@ class Database:
             "last_id": messages[-1]["id"] if messages else None,
         }
 
-    def list_conversations(self, user_id: int, limit: int = 100) -> list[dict[str, Any]]:
+    def list_conversations(self, user_id: int, limit: int = 100, *, target_scope: str | None = None) -> list[dict[str, Any]]:
         """Build the modern conversation-list read model for one user."""
         limit = max(1, min(int(limit), 200))
         conversations: list[dict[str, Any]] = []
@@ -1874,14 +1958,22 @@ class Database:
                 (user_id,),
             ).fetchall()
             private_rows = conn.execute(
+                "SELECT peer_id,opened_at FROM private_conversations WHERE user_id=?", (user_id,)
+            ).fetchall()
+            legacy_rows = conn.execute(
                 "SELECT DISTINCT conversation_id FROM messages WHERE conversation_type='private'"
             ).fetchall()
             scopes: list[tuple[str, str, str, str]] = [
                 ("group", str(row["id"]), str(row["name"]), str(row["member_role"]))
                 for row in groups
             ]
-            for row in private_rows:
-                scope_id = str(row["conversation_id"])
+            private_opened_at = {
+                dm_conversation_id(user_id, int(row["peer_id"])): float(row["opened_at"])
+                for row in private_rows
+            }
+            private_ids = set(private_opened_at)
+            private_ids.update(str(row["conversation_id"]) for row in legacy_rows)
+            for scope_id in private_ids:
                 participants = dm_participants(scope_id)
                 if not participants or user_id not in participants:
                     continue
@@ -1893,6 +1985,8 @@ class Database:
                     scopes.append(("private", scope_id, str(peer["display_name"] or peer["username"]), ""))
 
             for scope_type, scope_id, title, member_role in scopes:
+                if target_scope is not None and scope_id != target_scope:
+                    continue
                 latest = conn.execute(
                     """
                     SELECT * FROM messages
@@ -1909,13 +2003,27 @@ class Database:
                     (user_id, scope_type, scope_id),
                 ).fetchone()
                 last_read = int(cursor["last_message_id"]) if cursor else 0
-                unread = conn.execute(
-                    """
-                    SELECT COUNT(*) AS count FROM messages
-                    WHERE conversation_type=? AND conversation_id=? AND id>?
-                    """,
-                    (scope_type, scope_id, last_read),
-                ).fetchone()
+                if scope_type == "private":
+                    participants = dm_participants(scope_id)
+                    peer_id = participants[1] if participants[0] == user_id else participants[0]
+                    unread = conn.execute(
+                        "SELECT COUNT(*) AS count FROM messages WHERE conversation_type=? AND conversation_id=? AND id>? AND (sender_id IS NULL OR sender_id<>?)",
+                        (scope_type, scope_id, last_read, user_id),
+                    ).fetchone()
+                    peer_cursor = conn.execute(
+                        "SELECT last_message_id FROM read_cursors WHERE user_id=? AND conversation_type='private' AND conversation_id=?",
+                        (peer_id, scope_id),
+                    ).fetchone()
+                    block_rows = conn.execute(
+                        "SELECT blocker_id FROM private_blocks WHERE (blocker_id=? AND blocked_id=?) OR (blocker_id=? AND blocked_id=?)",
+                        (user_id, peer_id, peer_id, user_id),
+                    ).fetchall()
+                    blockers = {int(item["blocker_id"]) for item in block_rows}
+                else:
+                    unread = conn.execute(
+                        "SELECT COUNT(*) AS count FROM messages WHERE conversation_type=? AND conversation_id=? AND id>?",
+                        (scope_type, scope_id, last_read),
+                    ).fetchone()
                 latest_data = self._message_dict(latest) if latest else None
                 preview = ""
                 if latest_data:
@@ -1931,20 +2039,28 @@ class Database:
                         preview = f"[表情包] {latest_data.get('sticker_name') or ''}".strip()
                     else:
                         preview = str(latest_data.get("content", "")).replace("\n", " ")[:80]
-                conversations.append(
-                    {
-                        "conversation_type": scope_type,
-                        "conversation_id": scope_id,
-                        "title": title,
-                        "member_role": member_role,
-                        "last_message": latest_data,
-                        "last_message_preview": preview,
-                        "last_message_at": latest_data.get("created_at", 0) if latest_data else 0,
-                        "unread_count": int(unread["count"]) if unread else 0,
-                    }
-                )
+                conversation = {
+                    "conversation_type": scope_type,
+                    "conversation_id": scope_id,
+                    "title": title,
+                    "member_role": member_role,
+                    "last_message": latest_data,
+                    "last_message_preview": preview,
+                    "last_message_at": latest_data.get("created_at", 0) if latest_data else 0,
+                    "unread_count": int(unread["count"]) if unread else 0,
+                }
+                if scope_type == "private":
+                    conversation.update(
+                        can_send=not blockers,
+                        blocked_by_me=user_id in blockers,
+                        peer_last_read_message_id=int(peer_cursor["last_message_id"]) if peer_cursor else 0,
+                    )
+                conversations.append(conversation)
         conversations.sort(
-            key=lambda item: (float(item["last_message_at"] or 0), item["title"]),
+            key=lambda item: (
+                float(item["last_message_at"] or private_opened_at.get(item["conversation_id"], 0)),
+                item["title"],
+            ),
             reverse=True,
         )
         return conversations[:limit]
@@ -2031,9 +2147,22 @@ class Database:
             event_id = conn.execute("INSERT INTO message_events(message_id,event_type) VALUES(?,'message.edited')", (message_id,)).lastrowid
         return {**self.get_message(message_id), "event_id": event_id}
 
-    def set_read_cursor(self, user_id: int, conversation_type: str, conversation_id: str, message_id: int) -> None:
+    def set_read_cursor(self, user_id: int, conversation_type: str, conversation_id: str, message_id: int) -> bool:
         self._assert_access(user_id, conversation_type, conversation_id)
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            message = conn.execute(
+                "SELECT 1 FROM messages WHERE id=? AND conversation_type=? AND conversation_id=?",
+                (message_id, conversation_type, conversation_id),
+            ).fetchone()
+            if not message:
+                raise DatabaseError("已读消息不属于当前会话")
+            previous = conn.execute(
+                "SELECT last_message_id FROM read_cursors WHERE user_id=? AND conversation_type=? AND conversation_id=?",
+                (user_id, conversation_type, conversation_id),
+            ).fetchone()
+            if previous and int(previous["last_message_id"]) >= message_id:
+                return False
             conn.execute(
                 """
                 INSERT INTO read_cursors(user_id,conversation_type,conversation_id,last_message_id) VALUES(?,?,?,?)
@@ -2042,6 +2171,7 @@ class Database:
                 """,
                 (user_id, conversation_type, conversation_id, message_id),
             )
+        return True
 
     def sync_for_user(self, user_id: int, limit_per_scope: int = 100) -> list[dict[str, Any]]:
         scopes: list[tuple[str, str]] = []

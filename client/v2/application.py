@@ -610,6 +610,7 @@ class DetailsScrim(QFrame):
 
 class ChatPane(QWidget):
     conversation_list_requested = Signal()
+    latest_viewed = Signal()
     draft_preview_changed = Signal(object, str)
     drafts_loaded = Signal(object)
 
@@ -657,6 +658,16 @@ class ChatPane(QWidget):
         self._follow_pending = True
         self._sticker_library: LocalStickerLibrary | None = None
         self._sticker_panel: StickerPanel | None = None
+        self._latest_outgoing_id = 0
+        self._outbox_seen: dict[str, dict[str, Any]] = {}
+        self._typing_active = False
+        self._typing_timer = QTimer(self)
+        self._typing_timer.setInterval(3000)
+        self._typing_timer.timeout.connect(self._pulse_private_typing)
+        self._peer_typing_timer = QTimer(self)
+        self._peer_typing_timer.setSingleShot(True)
+        self._peer_typing_timer.setInterval(6000)
+        self._peer_typing_timer.timeout.connect(self._expire_peer_typing)
         self.root_layout = QHBoxLayout(self)
         self.root_layout.setContentsMargins(0, 0, 0, 0)
         main = QFrame()
@@ -794,6 +805,12 @@ class ChatPane(QWidget):
         self.agent_activity.setProperty("messageType", "agent_status")
         self.agent_activity.hide()
         composer_layout.addWidget(self.agent_activity)
+        self.private_outbox_panel = QWidget()
+        self.private_outbox_layout = QVBoxLayout(self.private_outbox_panel)
+        self.private_outbox_layout.setContentsMargins(0, 0, 0, 0)
+        self.private_outbox_layout.setSpacing(4)
+        self.private_outbox_panel.hide()
+        composer_layout.addWidget(self.private_outbox_panel)
         composer_layout.addWidget(self.reply_hint)
         composer_layout.addWidget(self.mention_list)
         composer_layout.addLayout(input_row)
@@ -827,6 +844,7 @@ class ChatPane(QWidget):
         self.compose.mention_closed.connect(self._hide_mentions)
         self.compose.mention_key.connect(self._mention_key)
         self.compose.textChanged.connect(self._capture_draft_change)
+        self.compose.textChanged.connect(self._update_private_typing)
         self.compose.composition_state_changed.connect(self._composition_state_changed)
         self.mention_list.itemClicked.connect(self._choose_mention)
         QShortcut(QKeySequence("Ctrl+Return"), self.compose, activated=self._send)
@@ -883,6 +901,11 @@ class ChatPane(QWidget):
             self._emit_draft_preview(self.key, draft)
             self._draft_timer.start()
             return
+        if self.key.kind == "private" and any(
+            record.get("key") == self.key and record.get("status") in {"uncertain", "retry_ready", "sending"}
+            for record in self.store.state.private_outbox.values()
+        ):
+            return
         if self.draft_store.remove(self.key):
             self.draft_store.flush()
         self._emit_draft_preview(self.key, None)
@@ -904,6 +927,13 @@ class ChatPane(QWidget):
             return
         self._deferred_draft_key = None
         draft = self.draft_store.get(key)
+        if key.kind == "private" and draft is not None and any(
+            record.get("key") == key
+            and record.get("payload", {}).get("content") == draft.text
+            and record.get("status") in {"uncertain", "retry_ready", "sending"}
+            for record in self.store.state.private_outbox.values()
+        ):
+            draft = None
         self._restoring_draft = True
         try:
             self.compose.blockSignals(True)
@@ -943,8 +973,14 @@ class ChatPane(QWidget):
         self._capture_draft_change()
         self.draft_store.flush()
         self.draft_store.set_account(account)
-        self._publish_loaded_drafts()
         switching_identity = previous_account != "anonymous" and account != previous_account
+        if switching_identity:
+            state.private_outbox.clear()
+        for request_id, (key, payload) in self.draft_store.pending_private_sends().items():
+            state.private_outbox.setdefault(
+                request_id, {"key": key, "payload": payload, "status": "uncertain"}
+            )
+        self._publish_loaded_drafts()
         if switching_identity:
             self._reset_for_account_switch()
         elif self.key is not None:
@@ -965,6 +1001,7 @@ class ChatPane(QWidget):
         self._follow_pending = True
         self._force_follow = True
         self._conversation_views.clear()
+        self._outbox_seen.clear()
         self._auto_media_requested.clear()
         self._restoring_draft = True
         try:
@@ -1105,10 +1142,15 @@ class ChatPane(QWidget):
         if self.key == key:
             self.title_text = title
             self.title.setText(title)
+            self.compose.setPlaceholderText("输入消息，可用 @ 提及对方或 AI Agent" if key.kind == "private" else "输入 @ 选择群成员或 AI Agent")
             self.avatar.set_avatar(title, group=key.kind == "group")
             self._refresh_agent_activity()
             self._refresh_subtitle()
             return
+        self._stop_private_typing()
+        self._peer_typing_timer.stop()
+        if self.key and self.key.kind == "private":
+            self.store.state.private_typing[self.key] = False
         self._flush_current_draft()
         self._render_timer.stop()
         self._render_pending_count_new = False
@@ -1123,6 +1165,7 @@ class ChatPane(QWidget):
         self._refresh_agent_activity()
         self.title_text = title
         self.title.setText(title)
+        self.compose.setPlaceholderText("输入消息，可用 @ 提及对方或 AI Agent" if key.kind == "private" else "输入 @ 选择群成员或 AI Agent")
         self.details_button.setText("群设置" if key.kind == "group" else "详情")
         self.details_button.setAccessibleName(
             "打开群设置" if key.kind == "group" else "打开会话详情"
@@ -1137,6 +1180,8 @@ class ChatPane(QWidget):
         self._hide_mentions()
         self._hide_details()
         self.details.set_context(key, title, self.store.state)
+        self._refresh_private_state()
+        self._refresh_private_outbox()
         self._prefetch_agent_avatars()
         self.render_messages(force=True)
 
@@ -1295,6 +1340,11 @@ class ChatPane(QWidget):
         footer_text = (
             time.strftime("%H:%M", time.localtime(stamp)) if stamp else ""
         ) + (" · 已编辑" if message.get("edited") else "")
+        if (self.key.kind == "private" and self.store.state.capabilities.get("private_chat_v2")
+                and mine and int(message.get("id", 0) or 0) == self._latest_outgoing_id):
+            summary = next((item for item in self.store.state.conversations if item.key == self.key), None)
+            read_id = summary.peer_last_read_message_id if summary else 0
+            footer_text += " · 已读" if read_id >= self._latest_outgoing_id else " · 已发送"
         footer = QLabel(footer_text)
         footer.setObjectName("MessageTime")
         footer.setAlignment(content_alignment)
@@ -1366,7 +1416,11 @@ class ChatPane(QWidget):
             self._remember_latest_message(records)
         loading = self.key is not None and self._loading_key == self.key
         records_signature = self._records_signature(records)
-        render_state = (self.key, loading, records_signature)
+        summary = next((item for item in self.store.state.conversations if item.key == self.key), None)
+        receipt_id = summary.peer_last_read_message_id if summary and self.key and self.key.kind == "private" else 0
+        render_state = (self.key, loading, records_signature, receipt_id)
+        own_id = str(self.store.state.current_user.get("id", ""))
+        self._latest_outgoing_id = max((int(item.get("id", 0) or 0) for item in records if str(item.get("sender_id", "")) == own_id), default=0)
         if (
             not force
             and self.key == self._rendered_key
@@ -1614,6 +1668,7 @@ class ChatPane(QWidget):
         if self._pending_new_messages:
             self._pending_new_messages = 0
             self._sync_new_messages_badge()
+        self.latest_viewed.emit()
 
     def _handle_scroll_range(self, _minimum: int, maximum: int) -> None:
         if not self.scroll.isVisible():
@@ -1691,6 +1746,7 @@ class ChatPane(QWidget):
         try:
             self._layout_pending = False
             self._scroll_to_bottom()
+            self.latest_viewed.emit()
         except RuntimeError:
             return
 
@@ -1753,8 +1809,118 @@ class ChatPane(QWidget):
         self.draft_store.put(key, draft)
         self.draft_store.flush()
         self._emit_draft_preview(key, draft)
-        if key == self.key:
+        if key == self.key and not (key.kind == "private" and any(
+            record.get("key") == key and record.get("status") in {"uncertain", "retry_ready", "sending"}
+            for record in state.private_outbox.values()
+        )):
             self._apply_draft(key)
+
+    def _private_can_send(self) -> bool:
+        if self.key is None or self.key.kind != "private":
+            return True
+        summary = next((item for item in self.store.state.conversations if item.key == self.key), None)
+        state = self.store.state.private_states.get(self.key, {})
+        return bool(state.get("can_send", summary.can_send if summary else True))
+
+    def _refresh_private_state(self) -> None:
+        allowed = self._private_can_send()
+        for widget in (self.compose, self.send, self.image, self.sticker, self.ai):
+            widget.setEnabled(allowed)
+            widget.setToolTip("" if allowed else "当前私聊不可发送")
+        if not allowed:
+            self._stop_private_typing()
+
+    def _update_private_typing(self) -> None:
+        if (not self.key or self.key.kind != "private" or not self.store.state.connected
+                or not self.store.state.capabilities.get("private_chat_v2") or not self._private_can_send()):
+            self._stop_private_typing()
+            return
+        if self.compose.toPlainText().strip():
+            if not self._typing_active:
+                self._typing_active = True
+                self.service.set_private_typing(self.key, True)
+                self._typing_timer.start()
+        else:
+            self._stop_private_typing()
+
+    def _pulse_private_typing(self) -> None:
+        if self._typing_active and self.key and self.key.kind == "private" and self.store.state.connected:
+            self.service.set_private_typing(self.key, True)
+        else:
+            self._typing_timer.stop()
+
+    def _stop_private_typing(self) -> None:
+        if self._typing_active and self.key and self.key.kind == "private" and self.store.state.connected:
+            self.service.set_private_typing(self.key, False)
+        self._typing_active = False
+        self._typing_timer.stop()
+
+    def _expire_peer_typing(self) -> None:
+        if self.key and self.key.kind == "private":
+            self.store.state.private_typing[self.key] = False
+            self._refresh_subtitle()
+
+    def _refresh_private_outbox(self) -> None:
+        current_outbox = self.store.state.private_outbox
+        for request_id, previous in self._outbox_seen.items():
+            if request_id in current_outbox or previous.get("status") == "failed":
+                continue
+            self.draft_store.forget_private_send(request_id)
+            key = previous.get("key")
+            content = previous.get("payload", {}).get("content")
+            if isinstance(key, ConversationKey) and content:
+                draft = self.draft_store.get(key)
+                if (draft and draft.text == content
+                        and not (key == self.key and self.compose.toPlainText())
+                        and self.draft_store.remove(key)):
+                    self.draft_store.flush()
+                    self._emit_draft_preview(key, None)
+        self._outbox_seen = {request_id: dict(record) for request_id, record in current_outbox.items()}
+        clear_layout(self.private_outbox_layout)
+        if not self.key or self.key.kind != "private":
+            self.private_outbox_panel.hide()
+            return
+        records = [
+            (request_id, record) for request_id, record in self.store.state.private_outbox.items()
+            if record.get("key") == self.key
+        ]
+        for request_id, record in records:
+            row = QWidget()
+            line = QHBoxLayout(row)
+            line.setContentsMargins(0, 0, 0, 0)
+            kind = str(record.get("payload", {}).get("message_type", "text"))
+            preview = str(record.get("payload", {}).get("content") or "")[:30] if kind == "text" else "[图片]" if kind == "image" else "[表情包]"
+            status = str(record.get("status", "sending"))
+            status_text = {"sending": "发送中", "uncertain": "等待重连核对", "retry_ready": "未发送，可手动重试", "failed": "发送失败"}.get(status, status)
+            label = QLabel(f"{status_text} · {preview}")
+            label.setObjectName("Muted")
+            label.setToolTip(str(record.get("error") or status_text))
+            line.addWidget(label, 1)
+            if status == "retry_ready":
+                button = QPushButton("重试")
+                button.setObjectName("Ghost")
+                button.setAccessibleName(f"重试发送 {preview}")
+                button.clicked.connect(lambda _checked=False, value=request_id: self.service.retry_private_send(value))
+                line.addWidget(button)
+            elif status == "uncertain" and self.store.state.connected and self.store.state.authenticated:
+                button = QPushButton("核对")
+                button.setObjectName("Ghost")
+                button.setAccessibleName(f"核对发送结果 {preview}")
+                button.clicked.connect(lambda _checked=False: self.service.reconcile_private_sends())
+                line.addWidget(button)
+            elif status == "failed":
+                button = QPushButton("清除")
+                button.setObjectName("Ghost")
+                button.setAccessibleName(f"清除失败发送 {preview}")
+                button.clicked.connect(lambda _checked=False, value=request_id: self._dismiss_private_send(value))
+                line.addWidget(button)
+            self.private_outbox_layout.addWidget(row)
+        self.private_outbox_panel.setVisible(bool(records))
+
+    def _dismiss_private_send(self, request_id: str) -> None:
+        self.store.state.private_outbox.pop(request_id, None)
+        self.draft_store.forget_private_send(request_id)
+        self._refresh_private_outbox()
 
     def _refresh_message_avatars(self) -> None:
         for row in tuple(self._message_rows.values()):
@@ -1768,10 +1934,21 @@ class ChatPane(QWidget):
             self._refresh_agent_activity()
         if topic == "connection" and not state.connected:
             self._auto_media_requested.clear()
+            self._stop_private_typing()
         if topic == "details" and self._pending_reply_sender_id:
             self._insert_reply_mention()
         if topic == "send_failed":
             self._restore_failed_send(state)
+        if topic == "private_typing" and self.key and self.key.kind == "private":
+            if state.private_typing.get(self.key):
+                self._peer_typing_timer.start()
+            else:
+                self._peer_typing_timer.stop()
+        if topic in {"conversations", "private_outbox", "private_read", "connection", "auth"}:
+            self._refresh_private_state()
+            self._refresh_private_outbox()
+        if topic in {"private_read", "conversations"} and self.key and self.key.kind == "private":
+            self.render_messages(count_new=False)
         if (
             topic in {"history", "messages", "agent_result", "error", "connection"}
             and self.key is not None
@@ -1795,7 +1972,7 @@ class ChatPane(QWidget):
             self._schedule_render(
                 count_new=True,
             )
-        if topic in {"details", "profile", "agent", "agents", "pending", "error"}:
+        if topic in {"details", "profile", "agent", "agents", "pending", "error", "conversations"}:
             self.details.set_context(self.key, self.title_text, state, topic)
         if topic == "search" and self.key:
             self.search_results.clear()
@@ -1835,6 +2012,10 @@ class ChatPane(QWidget):
         if not self.key:
             return
         parts = ["群聊" if self.key.kind == "group" else "私聊"]
+        if self.key.kind == "private" and self.store.state.private_typing.get(self.key):
+            parts.append("对方正在输入…")
+        if self.key.kind == "private" and not self._private_can_send():
+            parts.append("当前私聊不可发送")
         if self.key.kind == "group":
             member_count = len(self._members())
             if member_count:
@@ -2010,7 +2191,7 @@ class ChatPane(QWidget):
         self._sync_new_messages_badge()
 
     def _send(self) -> None:
-        if not self.key:
+        if not self.key or not self._private_can_send():
             return
         raw_text = self.compose.toPlainText()
         if not raw_text.strip():
@@ -2020,6 +2201,10 @@ class ChatPane(QWidget):
             key, raw_text, self.compose.mentions(), self._reply_to_id
         )
         if request_id:
+            if key.kind == "private" and request_id in self.store.state.private_outbox:
+                self.draft_store.remember_private_send(
+                    request_id, key, self.store.state.private_outbox[request_id]["payload"]
+                )
             self._restoring_draft = True
             try:
                 self.compose.blockSignals(True)
@@ -2036,6 +2221,7 @@ class ChatPane(QWidget):
                 self.draft_store.flush()
             self._emit_draft_preview(key, None)
             self._hide_mentions()
+            self._stop_private_typing()
             self._follow_latest_after_send()
         else:
             self._capture_draft_change()
@@ -2198,7 +2384,7 @@ class ChatPane(QWidget):
         self.search_results.addItem(item)
 
     def _send_image(self) -> None:
-        if not self.key:
+        if not self.key or not self._private_can_send():
             return
         path, _ = QFileDialog.getOpenFileName(self, "选择图片", "", "图片 (*.png *.jpg *.jpeg *.gif *.webp)")
         if not path:
@@ -2226,7 +2412,7 @@ class ChatPane(QWidget):
         self._sticker_panel.open()
 
     def _send_sticker(self, sticker: dict[str, Any]) -> None:
-        if not self.key or self._sticker_library is None:
+        if not self.key or not self._private_can_send() or self._sticker_library is None:
             return
         path = Path(str(sticker.get("path", "")))
         try:
@@ -4388,6 +4574,7 @@ class Workspace(QWidget):
         self.chat.set_history_loading(key, requested)
         self._compact_list_open = False
         self._apply_chat_layout()
+        self.store.notify("selection")
 
     def flush_drafts(self) -> None:
         self.chat.flush_drafts()
@@ -4450,6 +4637,7 @@ class MainWindow(QMainWindow):
         self.credentials: tuple[str, str] | None = None
         self.was_authenticated = False
         self._read_cursors: dict[ConversationKey, int] = {}
+        self._read_requests: dict[str, tuple[ConversationKey, int]] = {}
         self._tray: QSystemTrayIcon | None = None
         if QSystemTrayIcon.isSystemTrayAvailable():
             self._tray = QSystemTrayIcon(brand_logo_icon(24), self)
@@ -4469,6 +4657,8 @@ class MainWindow(QMainWindow):
         self.auth.submitted.connect(self._authenticate)
         self.workspace.logout_requested.connect(self._logout)
         self.workspace.notification_test_requested.connect(self._show_test_notification)
+        self.workspace.chat.latest_viewed.connect(lambda: self._mark_conversation_read(self.store.state))
+        self.workspace.pages.currentChanged.connect(lambda _index: QTimer.singleShot(0, lambda: self._mark_conversation_read(self.store.state)))
         self.store.subscribe(self._on_state)
         self.poll = QTimer(self)
         self.poll.setInterval(50)
@@ -4493,6 +4683,7 @@ class MainWindow(QMainWindow):
         self.workspace.flush_drafts()
         self._conversation_refresh_timer.stop()
         self._read_cursors.clear()
+        self._read_requests.clear()
         self.service.logout()
         self.store.clear_session()
         self.auth.password.clear()
@@ -4505,6 +4696,12 @@ class MainWindow(QMainWindow):
                 event = self.network.events.get_nowait()
             except queue.Empty:
                 break
+            request_id = str(event.get("request_id") or "")
+            if event.get("type") == "error" and request_id in self._read_requests:
+                key, previous = self._read_requests.pop(request_id)
+                self._read_cursors[key] = previous
+            elif event.get("type") == "ack":
+                self._read_requests.pop(request_id, None)
             self.store.handle_event(event)
             if event.get("type") == "message.event":
                 self._notify_new_message(event.get("payload"))
@@ -4558,7 +4755,9 @@ class MainWindow(QMainWindow):
 
     def _mark_conversation_read(self, state: AppState) -> None:
         key = state.current_conversation
-        if key is None:
+        if (key is None or not state.authenticated or self.stack.currentWidget() is not self.workspace
+                or self.workspace.pages.currentIndex() != 0 or not self.workspace.chat.isVisible()
+                or not self.isActiveWindow() or not self.workspace.chat._is_at_bottom()):
             return
         ids = [
             int(item.get("id", item.get("message_id")))
@@ -4572,8 +4771,11 @@ class MainWindow(QMainWindow):
             return
         payload = self.service.scope(key)
         payload["message_id"] = latest
-        if self.service.request("history.read", payload):
+        previous = self._read_cursors.get(key, 0)
+        request_id = self.service.request("history.read", payload)
+        if request_id:
             self._read_cursors[key] = latest
+            self._read_requests[request_id] = (key, previous)
 
     def _on_state(self, topic: str, state: AppState) -> None:
         if topic == "profile" and self.credentials and state.current_user.get("username"):
@@ -4584,12 +4786,17 @@ class MainWindow(QMainWindow):
             self.was_authenticated = True
             self.stack.setCurrentWidget(self.workspace)
             self.service.bootstrap_workspace()
+            self.service.reconcile_private_sends()
+            QTimer.singleShot(0, lambda: self._mark_conversation_read(self.store.state))
             if state.events_has_more:
                 self.service.sync_events()
         elif topic == "events" and state.events_has_more:
             self.service.sync_events()
         elif topic == "connection" and state.connected and self.was_authenticated and self.credentials and not state.authenticated:
             self.service.login(*self.credentials)
+        elif topic == "connection" and not state.connected:
+            self._read_cursors.clear()
+            self._read_requests.clear()
         elif topic == "error" and state.last_error:
             self.statusBar().showMessage(state.last_error, 5000)
         if topic == "agent_result" and state.authenticated:
@@ -4597,10 +4804,20 @@ class MainWindow(QMainWindow):
             self._schedule_conversation_refresh()
         if topic == "profile" and state.authenticated:
             self._schedule_conversation_refresh()
-        if topic in {"messages", "history", "selection"}:
-            self._mark_conversation_read(state)
         if topic in {"messages", "selection"} and state.authenticated:
             self._schedule_conversation_refresh()
+        if topic == "read":
+            self._schedule_conversation_refresh()
+        if topic == "private_read":
+            self._schedule_conversation_refresh()
+
+    def changeEvent(self, event: Any) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.ActivationChange and hasattr(self, "workspace"):
+            if self.isActiveWindow():
+                QTimer.singleShot(0, lambda: self._mark_conversation_read(self.store.state))
+            else:
+                self.workspace.chat._stop_private_typing()
 
     def closeEvent(self, event: Any) -> None:
         self._conversation_refresh_timer.stop()

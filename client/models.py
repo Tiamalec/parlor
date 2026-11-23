@@ -50,6 +50,9 @@ class ConversationSummary:
     unread_count: int = 0
     member_role: str = ""
     online: bool | None = None
+    can_send: bool = True
+    blocked_by_me: bool = False
+    peer_last_read_message_id: int = 0
 
 
 @dataclass(slots=True)
@@ -93,5 +96,9 @@ class AppState:
     pending: dict[str, str] = field(default_factory=dict)
     pending_sends: dict[str, tuple[ConversationKey, str, list[dict[str, Any]], int | None]] = field(default_factory=dict)
     failed_send: tuple[ConversationKey, str, list[dict[str, Any]], int | None] | None = None
+    private_opened: dict[ConversationKey, ConversationSummary] = field(default_factory=dict)
+    private_states: dict[ConversationKey, dict[str, Any]] = field(default_factory=dict)
+    private_typing: dict[ConversationKey, bool] = field(default_factory=dict)
+    private_outbox: dict[str, dict[str, Any]] = field(default_factory=dict)
     last_error: str = ""
 

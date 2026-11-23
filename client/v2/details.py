@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QLabel,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -505,12 +506,23 @@ class ConversationDetailsPanel(QFrame):
         self._nickname_request_id: str | None = None
         self.schedule = ScheduledSummarySetting()
         self.agents = GroupAgentSettings(service)
+        self.private_section = QWidget()
+        private_layout = QVBoxLayout(self.private_section)
+        private_layout.setContentsMargins(0, 0, 0, 0)
+        self.private_status = QLabel("")
+        self.private_status.setObjectName("Muted")
+        self.private_block = QPushButton("屏蔽用户")
+        self.private_block.setObjectName("DangerButton")
+        self.private_block.setAccessibleName("屏蔽私聊用户")
+        private_layout.addWidget(self.private_status)
+        private_layout.addWidget(self.private_block)
         self.content_layout.addWidget(self.overview)
         self.content_layout.addWidget(self.agents)
         self.content_layout.addWidget(self.members)
         self.content_layout.addWidget(self.nickname_section)
         self.content_layout.addWidget(self.nickname_feedback)
         self.content_layout.addWidget(self.schedule)
+        self.content_layout.addWidget(self.private_section)
         self.content_layout.addStretch()
         configure_scroll_surface(scroll, self.scroll_content)
         scroll.setWidget(self.scroll_content)
@@ -522,6 +534,7 @@ class ConversationDetailsPanel(QFrame):
         self.agents.manage_requested.connect(self.agent_manager_requested.emit)
         self.agents.memory_requested.connect(self.agent_memory_requested.emit)
         self.save_nickname.clicked.connect(self._set_nickname)
+        self.private_block.clicked.connect(self._set_private_block)
 
     def set_context(self, key: ConversationKey | None, title: str, state: AppState, topic: str = "") -> None:
         changed_group = key != self.key
@@ -541,6 +554,7 @@ class ConversationDetailsPanel(QFrame):
         self.nickname_feedback.setVisible(is_group)
         self.agents.setVisible(is_group)
         self.schedule.setVisible(is_group)
+        self.private_section.setVisible(not is_group and bool(state.capabilities.get("private_chat_v2")))
         if is_group:
             members = state.members_by_group.get(key.identifier, state.members)
             humans = sum(member.get("kind") != "agent" for member in members)
@@ -571,6 +585,30 @@ class ConversationDetailsPanel(QFrame):
             self.agents.set_group(key.identifier, state, topic)
         else:
             self.meta.setText("私聊")
+            summary = next((item for item in state.conversations if item.key == key), None)
+            private_state = state.private_states.get(key, {})
+            blocked_by_me = bool(private_state.get("blocked_by_me", summary.blocked_by_me if summary else False))
+            can_send = bool(private_state.get("can_send", summary.can_send if summary else True))
+            self.private_status.setText("你已屏蔽该用户" if blocked_by_me else "当前私聊不可发送" if not can_send else "")
+            self.private_block.setText("解除屏蔽" if blocked_by_me else "屏蔽用户")
+            self.private_block.setAccessibleName(self.private_block.text())
+            self.private_block.setEnabled(can_send or blocked_by_me)
+            self.private_block.setProperty("blocked", blocked_by_me)
+
+    def _set_private_block(self) -> None:
+        if not self.key or self.key.kind != "private":
+            return
+        blocked = bool(self.private_block.property("blocked"))
+        if not blocked and QMessageBox.question(
+            self, "屏蔽用户", "屏蔽后双方都无法在这段私聊中发送新消息。旧消息会保留。",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        request_id = self.service.set_private_block(self.key, not blocked)
+        if request_id:
+            self.private_block.setEnabled(False)
+            self.private_status.setText("正在更新屏蔽状态…")
+        else:
+            self.private_status.setText(self.service.store.state.last_error or "无法更新屏蔽状态")
 
     def _moderate(self, user_id: int, muted: bool) -> None:
         if self.key and self.key.kind == "group":

@@ -53,6 +53,9 @@ class AppStore:
         request_id = str(event.get("request_id", ""))
         if event_type == "network.send_failed":
             failed_id = str(payload.get("request_id", ""))
+            if failed_id in self.state.private_outbox:
+                self.state.private_outbox[failed_id]["status"] = "uncertain"
+                self.notify("private_outbox")
             self.state.pending.pop(failed_id, None)
             self.state.failed_send = self.state.pending_sends.pop(failed_id, None)
             self.state.last_error = "发送状态不确定；重连后请核对消息列表，再决定是否重试"
@@ -62,8 +65,15 @@ class AppStore:
         if event_type == "error" and request_id in self.state.pending_sends:
             self.state.failed_send = self.state.pending_sends.pop(request_id)
             self.notify("send_failed")
+        if event_type == "error" and request_id in self.state.private_outbox:
+            self.state.private_outbox[request_id]["status"] = "failed"
+            self.state.private_outbox[request_id]["error"] = str(payload.get("message") or "发送失败")
+            self.notify("private_outbox")
         if event_type == "ack":
             self.state.pending_sends.pop(request_id, None)
+            if payload.get("action") == "message.send" and request_id in self.state.private_outbox:
+                self.state.private_outbox.pop(request_id, None)
+                self.notify("private_outbox")
         if request_id:
             self.state.pending.pop(request_id, None)
 
@@ -74,6 +84,16 @@ class AppStore:
             return
         if event_type in {"network.disconnected", "network.reconnecting"}:
             self.state.connected = False
+            if any(self.state.private_typing.values()):
+                self.state.private_typing.clear()
+                self.notify("private_typing")
+            changed_outbox = False
+            for record in self.state.private_outbox.values():
+                if record.get("status") == "sending":
+                    record["status"] = "uncertain"
+                    changed_outbox = True
+            if changed_outbox:
+                self.notify("private_outbox")
             if self.state.pending_sends:
                 self.state.failed_send = list(self.state.pending_sends.values())[-1]
                 self.state.pending_sends.clear()
@@ -119,8 +139,57 @@ class AppStore:
             return
         if event_type == "conversation.list":
             records = payload.get("conversations", [])
-            self.state.conversations = [self._conversation(item) for item in records if isinstance(item, dict)]
+            summaries = [self._conversation(item) for item in records if isinstance(item, dict)]
+            present = {item.key for item in summaries}
+            summaries.extend(item for key, item in self.state.private_opened.items() if key not in present)
+            self.state.conversations = summaries
             self.notify("conversations")
+            return
+        if event_type == "private.opened":
+            item = payload.get("conversation")
+            if isinstance(item, dict):
+                summary = self._conversation(item)
+                self.state.private_opened[summary.key] = summary
+                if not any(existing.key == summary.key for existing in self.state.conversations):
+                    self.state.conversations.insert(0, summary)
+                self.notify("conversations")
+            return
+        if event_type == "private.state":
+            key = ConversationKey("private", str(payload.get("conversation_id", "")))
+            self.state.private_states[key] = dict(payload)
+            for summary in self.state.conversations:
+                if summary.key == key:
+                    summary.can_send = bool(payload.get("can_send", True))
+                    summary.blocked_by_me = bool(payload.get("blocked_by_me", False))
+            self.notify("conversations")
+            return
+        if event_type == "private.typing":
+            key = ConversationKey("private", str(payload.get("conversation_id", "")))
+            self.state.private_typing[key] = bool(payload.get("active", False))
+            self.notify("private_typing")
+            return
+        if event_type == "private.read":
+            key = ConversationKey("private", str(payload.get("conversation_id", "")))
+            if str(payload.get("reader_id")) != str(self._current_user_id()):
+                private_state = self.state.private_states.setdefault(key, {})
+                private_state["peer_last_read_message_id"] = max(
+                    int(private_state.get("peer_last_read_message_id", 0) or 0),
+                    int(payload.get("message_id", 0) or 0),
+                )
+                for summary in self.state.conversations:
+                    if summary.key == key:
+                        summary.peer_last_read_message_id = max(summary.peer_last_read_message_id, private_state["peer_last_read_message_id"])
+            self.notify("private_read")
+            return
+        if event_type == "message.status":
+            original_id = str(payload.get("client_request_id", ""))
+            record = self.state.private_outbox.get(original_id)
+            if record:
+                if payload.get("found"):
+                    self.state.private_outbox.pop(original_id, None)
+                else:
+                    record["status"] = "retry_ready"
+                self.notify("private_outbox")
             return
         if event_type in {"message.event", "message.edited", "agent.result"}:
             message = payload.get("message")
@@ -404,19 +473,29 @@ class AppStore:
             if payload.get("action") == "auth.logout":
                 self.clear_session()
                 return
+            if payload.get("action") == "history.read":
+                self.notify("read")
             self.notify("ack")
 
     def _current_user_id(self) -> int | str | None:
         return self.state.current_user.get("id", self.state.current_user.get("user_id"))
 
     def _conversation(self, item: dict[str, Any]) -> ConversationSummary:
+        key = ConversationKey(str(item.get("conversation_type", "")), str(item.get("conversation_id", "")))
+        private_state = self.state.private_states.get(key, {})
         return ConversationSummary(
-            key=ConversationKey(str(item.get("conversation_type", "")), str(item.get("conversation_id", ""))),
+            key=key,
             title=str(item.get("title", "未命名会话")),
             preview=str(item.get("last_message_preview", "")),
             timestamp=float(item.get("last_message_at", 0) or 0),
             unread_count=int(item.get("unread_count", 0) or 0),
             member_role=str(item.get("member_role", "")),
+            can_send=bool(private_state.get("can_send", item.get("can_send", True))),
+            blocked_by_me=bool(private_state.get("blocked_by_me", item.get("blocked_by_me", False))),
+            peer_last_read_message_id=max(
+                int(item.get("peer_last_read_message_id", 0) or 0),
+                int(private_state.get("peer_last_read_message_id", 0) or 0),
+            ),
         )
 
     def _merge_message(self, message: dict[str, Any], fallback: ConversationKey | None = None) -> None:

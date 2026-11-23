@@ -126,6 +126,7 @@ class DraftStore:
         self._settings = settings
         self._account = self._normalize_account(account)
         self._drafts: dict[ConversationKey, Draft] = {}
+        self._pending_private_sends: dict[str, tuple[ConversationKey, dict[str, Any]]] = {}
         self._dirty = False
         self._load()
 
@@ -147,6 +148,7 @@ class DraftStore:
 
     def _load(self) -> None:
         self._drafts = {}
+        self._pending_private_sends = {}
         self._dirty = False
         if self._settings is None:
             return
@@ -172,6 +174,17 @@ class DraftStore:
             draft = Draft.from_payload(record)
             if draft is not None:
                 self._drafts[ConversationKey(kind, identifier)] = draft
+        pending = payload.get("pending_private_sends", {})
+        if isinstance(pending, dict):
+            for request_id, record in pending.items():
+                if not isinstance(record, dict) or not isinstance(record.get("payload"), dict):
+                    continue
+                key_text = str(record.get("key") or "")
+                kind, _, identifier = key_text.partition(":")
+                message = record["payload"]
+                if (kind == "private" and identifier and message.get("message_type") == "text"
+                        and isinstance(message.get("content"), str) and request_id):
+                    self._pending_private_sends[str(request_id)] = (ConversationKey(kind, identifier), dict(message))
 
     def set_account(self, account: Any) -> dict[ConversationKey, Draft]:
         normalized = self._normalize_account(account)
@@ -207,16 +220,35 @@ class DraftStore:
     def previews(self) -> dict[ConversationKey, str]:
         return {key: draft.preview() for key, draft in self._drafts.items() if draft.text}
 
+    def pending_private_sends(self) -> dict[str, tuple[ConversationKey, dict[str, Any]]]:
+        return {request_id: (key, dict(payload)) for request_id, (key, payload) in self._pending_private_sends.items()}
+
+    def remember_private_send(self, request_id: str, key: ConversationKey, payload: dict[str, Any]) -> None:
+        if key.kind != "private" or payload.get("message_type") != "text":
+            return
+        self._pending_private_sends[request_id] = (key, dict(payload))
+        self._dirty = True
+        self.flush()
+
+    def forget_private_send(self, request_id: str) -> None:
+        if self._pending_private_sends.pop(request_id, None) is not None:
+            self._dirty = True
+            self.flush()
+
     def flush(self) -> None:
         if not self._dirty or self._settings is None:
             self._dirty = False
             return
         payload = {
-            "version": 1,
+            "version": 2,
             "drafts": {
                 key.storage_id: draft.to_payload()
                 for key, draft in self._drafts.items()
                 if draft.text
+            },
+            "pending_private_sends": {
+                request_id: {"key": key.storage_id, "payload": message}
+                for request_id, (key, message) in self._pending_private_sends.items()
             },
         }
         self._settings.setValue(

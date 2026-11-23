@@ -50,6 +50,135 @@ class WireClient:
 
 
 class ServerIntegrationTests(unittest.TestCase):
+    def test_private_chat_v2_protocol(self) -> None:
+        asyncio.run(self._private_chat_v2_scenario())
+
+    async def _private_chat_v2_scenario(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            config = replace(Config.from_env(), host="127.0.0.1", port=0, data_dir=root,
+                             database_path=root / "chat.sqlite3", uploads_dir=root / "uploads",
+                             admin_username=None, admin_password=None, agent_base_url="http://127.0.0.1:9/v1")
+            server = ChatServer(config)
+            await server.start()
+            port = int(server._server.sockets[0].getsockname()[1])
+            alice, bob = await asyncio.gather(WireClient.connect(port), WireClient.connect(port))
+            try:
+                identities = {}
+                for client, name in ((alice, "alice"), (bob, "bob01")):
+                    request = await client.send("auth.register", {"username": name, "password": "password-123"})
+                    result = (await client.until("auth.result", request_id=request))["payload"]
+                    self.assertTrue(result["capabilities"]["private_chat_v2"])
+                    identities[name] = result["user"]["id"]
+                alice_id, bob_id = identities["alice"], identities["bob01"]
+                scope_id = f"dm:{min(alice_id, bob_id)}:{max(alice_id, bob_id)}"
+                scope = {"conversation_type": "private", "conversation_id": scope_id}
+
+                request = await alice.send("group.create", {"name": "read-boundary"})
+                group_id = (await alice.until("group.created", request_id=request))["payload"]["group"]["id"]
+                request = await alice.send("message.send", {"conversation_type": "group", "conversation_id": str(group_id), "content": "group only"})
+                await alice.until("ack", request_id=request)
+                group_message = (await alice.until("message.event"))["payload"]["message"]
+
+                request = await alice.send("private.open", {"target_user_id": bob_id})
+                opened = (await alice.until("private.opened", request_id=request))["payload"]["conversation"]
+                self.assertEqual(opened["conversation_id"], scope_id)
+                self.assertIsNone(opened["last_message"])
+                self.assertTrue(opened["can_send"])
+                request = await bob.send("conversation.list")
+                self.assertFalse(any(item["conversation_id"] == scope_id for item in
+                                     (await bob.until("conversation.list", request_id=request))["payload"]["conversations"]))
+                server.database.initialize()
+                request = await alice.send("conversation.list", {"limit": 1})
+                ordered = (await alice.until("conversation.list", request_id=request))["payload"]["conversations"]
+                self.assertEqual(len(ordered), 1)
+                self.assertEqual(ordered[0]["conversation_id"], scope_id)
+                self.assertEqual(ordered[0]["last_message_at"], 0)
+
+                request = await alice.send("private.typing", {"conversation_id": scope_id, "active": True})
+                typing = (await bob.until("private.typing"))["payload"]
+                self.assertEqual((typing["user_id"], typing["active"]), (alice_id, True))
+                await alice.until("ack", request_id=request)
+                request = await alice.send("message.send", {**scope, "content": "hello"}, request_id="dm-first")
+                first = (await bob.until("message.event"))["payload"]["message"]
+                await alice.until("ack", request_id=request)
+                await alice.until("message.event")
+                request = await bob.send("message.send", {**scope, "content": "reply"}, request_id="dm-reply")
+                second = (await alice.until("message.event"))["payload"]["message"]
+                await bob.until("ack", request_id=request)
+                await bob.until("message.event")
+                request = await alice.send("message.send", {**scope, "content": "another"})
+                await alice.until("ack", request_id=request)
+                await alice.until("message.event")
+                await bob.until("message.event")
+                request = await alice.send("conversation.list")
+                alice_list = (await alice.until("conversation.list", request_id=request))["payload"]["conversations"]
+                private = next(item for item in alice_list if item["conversation_id"] == scope_id)
+                self.assertEqual(private["unread_count"], 1)
+                self.assertEqual(private["peer_last_read_message_id"], 0)
+                request = await bob.send("conversation.list")
+                bob_list = (await bob.until("conversation.list", request_id=request))["payload"]["conversations"]
+                self.assertEqual(next(item for item in bob_list if item["conversation_id"] == scope_id)["unread_count"], 2)
+
+                request = await alice.send("history.read", {**scope, "message_id": 999999})
+                await alice.until("error", request_id=request)
+                request = await alice.send("history.read", {**scope, "message_id": group_message["id"]})
+                await alice.until("error", request_id=request)
+                request = await alice.send("history.read", {**scope, "message_id": second["id"]})
+                await alice.until("ack", request_id=request)
+                read = (await bob.until("private.read"))["payload"]
+                self.assertEqual((read["reader_id"], read["message_id"]), (alice_id, second["id"]))
+                await alice.until("private.read")
+                request = await alice.send("history.read", {**scope, "message_id": first["id"]})
+                await alice.until("ack", request_id=request)
+                self.assertFalse(any(item["type"] == "private.read" for item in alice.backlog))
+
+                request = await alice.send("message.status", {"client_request_id": "dm-first"})
+                status = (await alice.until("message.status", request_id=request))["payload"]
+                self.assertEqual(status["message_id"], first["id"])
+                request = await bob.send("message.status", {"client_request_id": "dm-first"})
+                self.assertFalse((await bob.until("message.status", request_id=request))["payload"]["found"])
+                reconnected = await WireClient.connect(port)
+                try:
+                    request = await reconnected.send("auth.login", {"username": "alice", "password": "password-123", "after_event_id": 0})
+                    await reconnected.until("auth.result", request_id=request)
+                    request = await reconnected.send("message.status", {"client_request_id": "dm-first"})
+                    self.assertEqual((await reconnected.until("message.status", request_id=request))["payload"]["message_id"], first["id"])
+                    request = await reconnected.send("message.send", {**scope, "content": "hello"}, request_id="dm-first")
+                    self.assertTrue((await reconnected.until("ack", request_id=request))["payload"]["duplicate"])
+                finally:
+                    await reconnected.close()
+
+                request = await alice.send("private.block.set", {"target_user_id": bob_id, "blocked": True})
+                await alice.until("ack", request_id=request)
+                self.assertEqual((await alice.until("private.state"))["payload"]["blocked_by_me"], True)
+                peer_state = (await bob.until("private.state"))["payload"]
+                self.assertFalse(peer_state["can_send"])
+                self.assertFalse(peer_state["blocked_by_me"])
+                for client in (alice, bob):
+                    request = await client.send("message.send", {**scope, "content": "blocked"})
+                    self.assertEqual((await client.until("error", request_id=request))["payload"]["message"], "当前私聊不可发送")
+                with self.assertRaisesRegex(ValueError, "当前私聊不可发送"):
+                    server.database.save_message("private", scope_id, None, "Agent", "agent", "blocked reply", sender_kind="agent")
+                request = await bob.send("history.sync", scope)
+                history = (await bob.until("history.result", request_id=request))["payload"]["messages"]
+                self.assertEqual([item["content"] for item in history], ["hello", "reply", "another"])
+                request = await alice.send("private.block.set", {"target_user_id": bob_id, "blocked": False})
+                await alice.until("ack", request_id=request)
+                self.assertTrue((await alice.until("private.state"))["payload"]["can_send"])
+                self.assertTrue((await bob.until("private.state"))["payload"]["can_send"])
+                server.database.save_message("private", scope_id, None, "Agent", "agent", "agent reply", sender_kind="agent")
+                request = await alice.send("conversation.list")
+                conversations = (await alice.until("conversation.list", request_id=request))["payload"]["conversations"]
+                self.assertEqual(next(item for item in conversations if item["conversation_id"] == scope_id)["unread_count"], 1)
+                request = await bob.send("conversation.list")
+                conversations = (await bob.until("conversation.list", request_id=request))["payload"]["conversations"]
+                self.assertEqual(next(item for item in conversations if item["conversation_id"] == scope_id)["unread_count"], 3)
+            finally:
+                await alice.close()
+                await bob.close()
+                await server.close()
+
     def test_identity_and_group_nickname_protocol(self) -> None:
         asyncio.run(self._identity_scenario())
 

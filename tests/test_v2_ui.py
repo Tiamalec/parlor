@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import base64
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -84,6 +84,82 @@ class V2UiTests(unittest.TestCase):
         pane.update_state("history", store.state)
         self.app.processEvents()
         self.assertIsNone(pane._focus_message_id)
+
+    def test_private_receipt_typing_and_blocked_composer(self) -> None:
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import ChatPane
+
+        store = AppStore()
+        store.state.current_user = {"id": 1, "role": "user"}
+        store.state.capabilities["private_chat_v2"] = True
+        key = ConversationKey("private", "dm:1:2")
+        store.state.conversations = [ConversationSummary(key, "bob")]
+        store.state.messages[key] = [{
+            "id": 9, "conversation_type": "private", "conversation_id": key.identifier,
+            "sender_id": 1, "sender_name": "alice", "message_type": "text",
+            "content": "hello", "created_at": 1000,
+        }]
+        pane = ChatPane(ChatService(NetworkClient("127.0.0.1", 9), store), store)
+        pane.set_conversation(key, "bob")
+        pane.show()
+        self.app.processEvents()
+        self.assertTrue(any("已发送" in label.text() for label in pane.findChildren(QLabel, "MessageTime")))
+        store.handle_event({"type": "private.read", "payload": {
+            "conversation_id": key.identifier, "reader_id": 2, "message_id": 9,
+        }})
+        pane.update_state("private_read", store.state)
+        self.app.processEvents()
+        self.assertTrue(any("已读" in label.text() for label in pane.findChildren(QLabel, "MessageTime")))
+        store.handle_event({"type": "private.typing", "payload": {
+            "conversation_id": key.identifier, "user_id": 2, "active": True,
+        }})
+        pane.update_state("private_typing", store.state)
+        self.assertIn("对方正在输入", pane.subtitle.text())
+        store.handle_event({"type": "private.state", "payload": {
+            "conversation_id": key.identifier, "can_send": False, "blocked_by_me": False,
+        }})
+        pane.update_state("conversations", store.state)
+        self.assertFalse(pane.compose.isEnabled())
+        self.assertFalse(pane.send.isEnabled())
+        self.assertIn("不可发送", pane.subtitle.text())
+        pane._peer_typing_timer.stop()
+
+    def test_private_read_waits_until_latest_message_is_viewed(self) -> None:
+        from client.network import NetworkClient
+        from client.v2.application import MainWindow
+
+        with patch.object(NetworkClient, "start"):
+            window = MainWindow("127.0.0.1", 9)
+        window.poll.stop()
+        window.show()
+        window.isActiveWindow = Mock(return_value=True)
+        state = window.store.state
+        state.authenticated = True
+        state.current_user = {"id": 1}
+        key = ConversationKey("private", "dm:1:2")
+        state.current_conversation = key
+        state.messages[key] = [
+            {"id": index, "conversation_type": "private", "conversation_id": key.identifier,
+             "sender_id": 2, "sender_name": "bob", "message_type": "text", "content": "long message " * 6}
+            for index in range(1, 81)
+        ]
+        window.stack.setCurrentWidget(window.workspace)
+        window.workspace.chat.set_conversation(key, "bob")
+        self.app.processEvents()
+        self.app.processEvents()
+        scrollbar = window.workspace.chat.scroll.verticalScrollBar()
+        self.assertGreater(scrollbar.maximum(), 0)
+        window.service.request = Mock(return_value="read-1")
+        scrollbar.setValue(0)
+        window._mark_conversation_read(state)
+        window.service.request.assert_not_called()
+        scrollbar.setValue(scrollbar.maximum())
+        window._mark_conversation_read(state)
+        window.service.request.assert_called_once()
+        self.assertEqual(window.service.request.call_args.args[0], "history.read")
+        window.close()
 
     def test_group_message_metadata_is_outside_bubble_and_consecutive_sender_is_grouped(self) -> None:
         from client.network import NetworkClient
