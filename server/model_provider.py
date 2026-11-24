@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import ipaddress
 import json
+import math
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field, replace
@@ -10,6 +12,7 @@ from typing import Any, Protocol
 from urllib.parse import quote, urlsplit
 
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+MAX_REQUEST_BYTES = 4 * 1024 * 1024
 MAX_RETRY_OUTPUT_TOKENS = 8192
 SUPPORTED_PROTOCOLS = {"openai_chat", "ollama_native", "gemini_native"}
 SUPPORTED_AUTH_TYPES = {"none", "bearer", "x-api-key", "x-goog-api-key"}
@@ -156,6 +159,395 @@ class ModelProvider(Protocol):
     async def health(self) -> bool: ...
     async def list_models(self) -> list[str]: ...
     async def generate(self, system_prompt: str, user_prompt: str) -> str: ...
+    async def generate_tool_turn(
+        self,
+        system_prompt: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+    ) -> "ProviderTurn": ...
+
+
+@dataclass(frozen=True)
+class ProviderToolCall:
+    id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ProviderTurn:
+    content: str
+    tool_calls: list[ProviderToolCall] = field(default_factory=list)
+
+
+def _invalid_response(message: str = "模型返回格式无效") -> AgentUnavailable:
+    return AgentUnavailable(message, "invalid_response")
+
+
+def _validate_json_value(value: Any) -> None:
+    if value is None or type(value) in {str, bool, int}:
+        return
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError("JSON 参数包含非有限数值")
+        return
+    if isinstance(value, list):
+        for item in value:
+            _validate_json_value(item)
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError("JSON 参数对象的键必须是字符串")
+            _validate_json_value(item)
+        return
+    raise ValueError("JSON 参数包含不支持的值")
+
+
+def _reject_json_constant(constant: str) -> None:
+    raise ValueError(f"无效 JSON 常量：{constant}")
+
+
+def _decode_tool_arguments(value: Any) -> dict[str, Any]:
+    if value is None:
+        value = {}
+    if isinstance(value, str):
+        try:
+            value = json.loads(
+                value,
+                parse_constant=_reject_json_constant,
+            )
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ValueError("工具参数不是有效 JSON") from exc
+    if not isinstance(value, dict):
+        raise ValueError("工具参数必须是 JSON 对象")
+    _validate_json_value(value)
+    return json.loads(json.dumps(value, ensure_ascii=False, allow_nan=False))
+
+
+def _stable_tool_call_id(provider: str, position: int, name: str, arguments: dict[str, Any]) -> str:
+    identity = json.dumps(
+        [provider, position, name, arguments],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return f"call_{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:24]}"
+
+
+def _validated_tool_name(value: Any, *, response: bool) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value.strip()) > 200:
+        if response:
+            raise _invalid_response()
+        raise ValueError("工具名称不能为空且不能超过 200 个字符")
+    return value.strip()
+
+
+def _validated_call_id(
+    value: Any,
+    *,
+    provider: str,
+    position: int,
+    name: str,
+    arguments: dict[str, Any],
+    response: bool,
+) -> str:
+    if value is None or value == "":
+        return _stable_tool_call_id(provider, position, name, arguments)
+    if not isinstance(value, str) or not value.strip() or len(value.strip()) > 512:
+        if response:
+            raise _invalid_response()
+        raise ValueError("工具调用 ID 格式无效")
+    return value.strip()
+
+
+def _parse_response_tool_call(
+    *,
+    call_id: Any,
+    name: Any,
+    arguments: Any,
+    provider: str,
+    position: int,
+) -> ProviderToolCall:
+    checked_name = _validated_tool_name(name, response=True)
+    try:
+        checked_arguments = _decode_tool_arguments(arguments)
+    except (TypeError, ValueError) as exc:
+        raise _invalid_response("模型返回的工具参数无效") from exc
+    return ProviderToolCall(
+        id=_validated_call_id(
+            call_id,
+            provider=provider,
+            position=position,
+            name=checked_name,
+            arguments=checked_arguments,
+            response=True,
+        ),
+        name=checked_name,
+        arguments=checked_arguments,
+    )
+
+
+def _normalize_function_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not isinstance(tools, list):
+        raise ValueError("工具定义必须是列表")
+    normalized: list[dict[str, Any]] = []
+    for index, item in enumerate(tools):
+        if not isinstance(item, dict):
+            raise ValueError(f"工具定义 #{index + 1} 无效")
+        tool_type = item.get("type", "function")
+        if tool_type != "function":
+            raise ValueError("目前仅支持 function 工具")
+        function = item.get("function", item)
+        if not isinstance(function, dict):
+            raise ValueError(f"工具定义 #{index + 1} 无效")
+        name = _validated_tool_name(function.get("name"), response=False)
+        description = function.get("description", "")
+        if not isinstance(description, str):
+            raise ValueError("工具描述必须是字符串")
+        parameters = function.get("parameters")
+        if parameters is None:
+            parameters = {"type": "object", "properties": {}}
+        try:
+            _validate_json_value(parameters)
+            parameters = json.loads(
+                json.dumps(parameters, ensure_ascii=False, allow_nan=False)
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("工具参数 Schema 必须是有效 JSON") from exc
+        if not isinstance(parameters, dict):
+            raise ValueError("工具参数 Schema 必须是 JSON 对象")
+        declaration: dict[str, Any] = {"name": name, "parameters": parameters}
+        if description:
+            declaration["description"] = description
+        normalized.append(declaration)
+    return normalized
+
+
+def _normalize_tool_messages(messages: list[dict[str, Any]], provider: str) -> list[dict[str, Any]]:
+    if not isinstance(messages, list):
+        raise ValueError("消息必须是列表")
+    normalized: list[dict[str, Any]] = []
+    for message_index, message in enumerate(messages):
+        if not isinstance(message, dict):
+            raise ValueError("消息格式无效")
+        role = message.get("role")
+        if role not in {"user", "assistant", "tool"}:
+            raise ValueError("消息角色必须是 user、assistant 或 tool")
+        content = message.get("content", "")
+        if content is None:
+            content = ""
+        if not isinstance(content, str):
+            raise ValueError("消息内容必须是字符串")
+        if role == "user":
+            if not content.strip():
+                raise ValueError("用户消息不能为空")
+            normalized.append({"role": "user", "content": content})
+            continue
+        if role == "tool":
+            tool_call_id = message.get("tool_call_id")
+            name = _validated_tool_name(message.get("name"), response=False)
+            if not isinstance(tool_call_id, str) or not tool_call_id.strip():
+                raise ValueError("工具结果必须包含 tool_call_id")
+            normalized.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call_id.strip(),
+                    "name": name,
+                    "content": content,
+                }
+            )
+            continue
+        raw_calls = message.get("tool_calls", [])
+        if not isinstance(raw_calls, list):
+            raise ValueError("assistant tool_calls 必须是列表")
+        calls: list[ProviderToolCall] = []
+        for call_index, raw_call in enumerate(raw_calls):
+            if isinstance(raw_call, ProviderToolCall):
+                name = _validated_tool_name(raw_call.name, response=False)
+                try:
+                    arguments = _decode_tool_arguments(raw_call.arguments)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("assistant 工具参数无效") from exc
+                call_id = raw_call.id
+            elif isinstance(raw_call, dict):
+                call_type = raw_call.get("type", "function")
+                if call_type != "function":
+                    raise ValueError("目前仅支持 function 工具调用")
+                function = raw_call.get("function", raw_call)
+                if not isinstance(function, dict):
+                    raise ValueError("assistant 工具调用格式无效")
+                name = _validated_tool_name(function.get("name"), response=False)
+                try:
+                    arguments = _decode_tool_arguments(
+                        function.get("arguments", raw_call.get("arguments"))
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("assistant 工具参数无效") from exc
+                call_id = raw_call.get("id")
+            else:
+                raise ValueError("assistant 工具调用格式无效")
+            calls.append(
+                ProviderToolCall(
+                    id=_validated_call_id(
+                        call_id,
+                        provider=provider,
+                        position=message_index * 1000 + call_index,
+                        name=name,
+                        arguments=arguments,
+                        response=False,
+                    ),
+                    name=name,
+                    arguments=arguments,
+                )
+            )
+        if not content.strip() and not calls:
+            raise ValueError("assistant 消息必须包含内容或工具调用")
+        normalized.append({"role": "assistant", "content": content, "tool_calls": calls})
+    return normalized
+
+
+def _compact_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+
+
+def _checked_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        encoded = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise AgentUnavailable("模型请求配置无效", "invalid_request") from exc
+    if len(encoded) > MAX_REQUEST_BYTES:
+        raise AgentUnavailable("模型请求内容过大", "invalid_request")
+    return payload
+
+
+def _parse_openai_tool_turn(result: dict[str, Any], provider: str) -> ProviderTurn:
+    try:
+        choice = result["choices"][0]
+        message = choice["message"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise _invalid_response() from exc
+    if not isinstance(message, dict):
+        raise _invalid_response()
+    if message.get("role", "assistant") != "assistant":
+        raise _invalid_response()
+    raw_calls = message.get("tool_calls")
+    if raw_calls is None:
+        raw_calls = []
+    if not isinstance(raw_calls, list):
+        raise _invalid_response()
+    calls: list[ProviderToolCall] = []
+    for index, raw_call in enumerate(raw_calls):
+        if not isinstance(raw_call, dict):
+            raise _invalid_response()
+        if raw_call.get("type", "function") != "function":
+            raise _invalid_response()
+        function = raw_call.get("function")
+        if not isinstance(function, dict):
+            raise _invalid_response()
+        calls.append(
+            _parse_response_tool_call(
+                call_id=raw_call.get("id"),
+                name=function.get("name"),
+                arguments=function.get("arguments"),
+                provider=provider,
+                position=index,
+            )
+        )
+    content = text_from_content(message.get("content"))
+    if not content and not calls:
+        raise AgentUnavailable("模型返回了空结果", "invalid_response")
+    return ProviderTurn(content=content, tool_calls=calls)
+
+
+def _parse_ollama_tool_turn(result: dict[str, Any], provider: str) -> ProviderTurn:
+    message = result.get("message")
+    if not isinstance(message, dict):
+        raise _invalid_response()
+    if message.get("role", "assistant") != "assistant":
+        raise _invalid_response()
+    raw_content = message.get("content", "")
+    if raw_content is None:
+        raw_content = ""
+    if not isinstance(raw_content, str):
+        raise _invalid_response()
+    raw_calls = message.get("tool_calls")
+    if raw_calls is None:
+        raw_calls = []
+    if not isinstance(raw_calls, list):
+        raise _invalid_response()
+    calls: list[ProviderToolCall] = []
+    for index, raw_call in enumerate(raw_calls):
+        if not isinstance(raw_call, dict):
+            raise _invalid_response()
+        function = raw_call.get("function")
+        if not isinstance(function, dict):
+            raise _invalid_response()
+        calls.append(
+            _parse_response_tool_call(
+                call_id=raw_call.get("id"),
+                name=function.get("name"),
+                arguments=function.get("arguments"),
+                provider=provider,
+                position=index,
+            )
+        )
+    content = raw_content.strip()
+    if not content and not calls:
+        raise AgentUnavailable("模型返回了空结果", "invalid_response")
+    return ProviderTurn(content=content, tool_calls=calls)
+
+
+def _parse_gemini_tool_turn(result: dict[str, Any], provider: str) -> ProviderTurn:
+    try:
+        content = result["candidates"][0]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise _invalid_response() from exc
+    if not isinstance(content, dict) or content.get("role", "model") != "model":
+        raise _invalid_response()
+    parts = content.get("parts")
+    if not isinstance(parts, list):
+        raise _invalid_response()
+    text_parts: list[str] = []
+    calls: list[ProviderToolCall] = []
+    for index, part in enumerate(parts):
+        if not isinstance(part, dict):
+            raise _invalid_response()
+        if "text" in part:
+            if not isinstance(part["text"], str):
+                raise _invalid_response()
+            if part["text"].strip():
+                text_parts.append(part["text"].strip())
+        raw_call = part.get("functionCall")
+        if raw_call is None:
+            continue
+        if not isinstance(raw_call, dict):
+            raise _invalid_response()
+        calls.append(
+            _parse_response_tool_call(
+                call_id=raw_call.get("id"),
+                name=raw_call.get("name"),
+                arguments=raw_call.get("args"),
+                provider=provider,
+                position=index,
+            )
+        )
+    content = "\n".join(text_parts).strip()
+    if not content and not calls:
+        raise AgentUnavailable("模型返回了空结果", "invalid_response")
+    return ProviderTurn(content=content, tool_calls=calls)
+
+
+def _gemini_function_response(content: str) -> dict[str, Any]:
+    try:
+        value = json.loads(content)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {"result": content}
+    _validate_json_value(value)
+    if isinstance(value, dict):
+        return value
+    return {"result": value}
 
 
 @dataclass
@@ -262,6 +654,72 @@ class OpenAIChatAdapter(_JsonHttpProvider):
             return best
         raise AgentUnavailable("模型返回了空结果", "invalid_response")
 
+    async def generate_tool_turn(
+        self,
+        system_prompt: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+    ) -> ProviderTurn:
+        declarations = _normalize_function_tools(tools)
+        normalized_messages = _normalize_tool_messages(messages, self.settings.protocol)
+        payload: dict[str, Any] = dict(self.settings.extra_parameters)
+        openai_messages: list[dict[str, Any]] = [
+            {"role": "system", "content": system_prompt}
+        ]
+        for message in normalized_messages:
+            if message["role"] == "user":
+                openai_messages.append(
+                    {"role": "user", "content": message["content"]}
+                )
+            elif message["role"] == "assistant":
+                calls = message["tool_calls"]
+                openai_calls = [
+                    {
+                        "id": call.id,
+                        "type": "function",
+                        "function": {
+                            "name": call.name,
+                            "arguments": _compact_json(call.arguments),
+                        },
+                    }
+                    for call in calls
+                ]
+                assistant_message: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": message["content"] or None,
+                }
+                if openai_calls:
+                    assistant_message["tool_calls"] = openai_calls
+                openai_messages.append(assistant_message)
+            else:
+                openai_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": message["tool_call_id"],
+                        "content": message["content"],
+                    }
+                )
+        payload.update(
+            {
+                "model": self.settings.model,
+                "messages": openai_messages,
+                "temperature": self.settings.temperature,
+                "max_tokens": self.settings.max_output_tokens,
+                "stream": False,
+            }
+        )
+        if declarations:
+            payload["tools"] = [
+                {"type": "function", "function": declaration}
+                for declaration in declarations
+            ]
+        if self.settings.reasoning_effort and self.settings.reasoning_effort != "none":
+            payload["reasoning_effort"] = self.settings.reasoning_effort
+        result = await asyncio.to_thread(
+            self._request_json, "POST", "/chat/completions", _checked_payload(payload)
+        )
+        return _parse_openai_tool_turn(result, self.settings.protocol)
+
 
 @dataclass
 class OllamaAdapter(_JsonHttpProvider):
@@ -293,6 +751,73 @@ class OllamaAdapter(_JsonHttpProvider):
         if not isinstance(content, str) or not content.strip():
             raise AgentUnavailable("模型返回了空结果", "invalid_response")
         return content.strip()
+
+    async def generate_tool_turn(
+        self,
+        system_prompt: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+    ) -> ProviderTurn:
+        declarations = _normalize_function_tools(tools)
+        normalized_messages = _normalize_tool_messages(messages, self.settings.protocol)
+        options = dict(self.settings.extra_parameters)
+        options.update(
+            {
+                "temperature": self.settings.temperature,
+                "num_predict": self.settings.max_output_tokens,
+            }
+        )
+        ollama_messages: list[dict[str, Any]] = [
+            {"role": "system", "content": system_prompt}
+        ]
+        for message in normalized_messages:
+            if message["role"] == "user":
+                ollama_messages.append(
+                    {"role": "user", "content": message["content"]}
+                )
+            elif message["role"] == "assistant":
+                calls = message["tool_calls"]
+                ollama_calls = [
+                    {
+                        "id": call.id,
+                        "function": {
+                            "name": call.name,
+                            "arguments": call.arguments,
+                        },
+                    }
+                    for call in calls
+                ]
+                assistant_message: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": message["content"],
+                }
+                if ollama_calls:
+                    assistant_message["tool_calls"] = ollama_calls
+                ollama_messages.append(assistant_message)
+            else:
+                ollama_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_name": message["name"],
+                        "content": message["content"],
+                    }
+                )
+        payload: dict[str, Any] = {
+            "model": self.settings.model,
+            "messages": ollama_messages,
+            "options": options,
+            "stream": False,
+            "think": self.settings.reasoning_effort != "none",
+        }
+        if declarations:
+            payload["tools"] = [
+                {"type": "function", "function": declaration}
+                for declaration in declarations
+            ]
+        result = await asyncio.to_thread(
+            self._request_json, "POST", "/api/chat", _checked_payload(payload)
+        )
+        return _parse_ollama_tool_turn(result, self.settings.protocol)
 
 
 @dataclass
@@ -328,6 +853,75 @@ class GeminiAdapter(_JsonHttpProvider):
         if not content.strip():
             raise AgentUnavailable("模型返回了空结果", "invalid_response")
         return content.strip()
+
+    async def generate_tool_turn(
+        self,
+        system_prompt: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+    ) -> ProviderTurn:
+        declarations = _normalize_function_tools(tools)
+        normalized_messages = _normalize_tool_messages(messages, self.settings.protocol)
+        contents: list[dict[str, Any]] = []
+        for message in normalized_messages:
+            if message["role"] == "user":
+                contents.append(
+                    {"role": "user", "parts": [{"text": message["content"]}]}
+                )
+            elif message["role"] == "assistant":
+                parts: list[dict[str, Any]] = []
+                if message["content"]:
+                    parts.append({"text": message["content"]})
+                parts.extend(
+                    {
+                        "functionCall": {
+                            "id": call.id,
+                            "name": call.name,
+                            "args": call.arguments,
+                        }
+                    }
+                    for call in message["tool_calls"]
+                )
+                contents.append({"role": "model", "parts": parts})
+            else:
+                contents.append(
+                    {
+                        "role": "user",
+                        "parts": [
+                            {
+                                "functionResponse": {
+                                    "id": message["tool_call_id"],
+                                    "name": message["name"],
+                                    "response": _gemini_function_response(
+                                        message["content"]
+                                    ),
+                                }
+                            }
+                        ],
+                    }
+                )
+        generation_config = dict(self.settings.extra_parameters)
+        generation_config.update(
+            {
+                "temperature": self.settings.temperature,
+                "maxOutputTokens": self.settings.max_output_tokens,
+            }
+        )
+        payload: dict[str, Any] = {
+            "system_instruction": {"parts": [{"text": system_prompt}]},
+            "contents": contents,
+            "generationConfig": generation_config,
+        }
+        if declarations:
+            payload["tools"] = [{"functionDeclarations": declarations}]
+        model = self.settings.model.removeprefix("models/")
+        result = await asyncio.to_thread(
+            self._request_json,
+            "POST",
+            f"/models/{quote(model, safe='-._')}:generateContent",
+            _checked_payload(payload),
+        )
+        return _parse_gemini_tool_turn(result, self.settings.protocol)
 
 
 OpenAICompatibleProvider = OpenAIChatAdapter

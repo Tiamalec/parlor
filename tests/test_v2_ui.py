@@ -85,6 +85,35 @@ class V2UiTests(unittest.TestCase):
         self.app.processEvents()
         self.assertIsNone(pane._focus_message_id)
 
+    def test_empty_chat_state_uses_centered_line_icon(self) -> None:
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import ChatPane
+        from client.v2.widgets import BrandLockup, EmptyState
+
+        store = AppStore()
+        store.state.current_user = {"id": 1, "role": "user"}
+        pane = ChatPane(ChatService(NetworkClient("127.0.0.1", 9), store), store)
+        pane.resize(900, 620)
+        pane.show()
+        pane.render_messages(force=True)
+        self.app.processEvents()
+        empty = pane.findChild(EmptyState)
+        self.assertIsNotNone(empty)
+        assert empty is not None
+        glyph = empty.findChild(BrandLockup)
+        self.assertIsNotNone(glyph)
+        assert glyph is not None
+        self.assertEqual(glyph.wordmark.text(), "Parlor")
+        self.assertFalse(glyph.icon_label.pixmap().isNull())
+        self.assertFalse(any("💬" in label.text() for label in empty.findChildren(QLabel)))
+        empty_center = empty.mapToGlobal(empty.rect().center())
+        viewport = pane.scroll.viewport()
+        viewport_center = viewport.mapToGlobal(viewport.rect().center())
+        self.assertLessEqual(abs(empty_center.x() - viewport_center.x()), 3)
+        self.assertLessEqual(abs(empty_center.y() - viewport_center.y()), 3)
+
     def test_private_receipt_typing_and_blocked_composer(self) -> None:
         from client.network import NetworkClient
         from client.service import ChatService
@@ -198,6 +227,50 @@ class V2UiTests(unittest.TestCase):
         self.assertEqual([bool(row.property("grouped")) for row in rows], [False, True, False])
         self.assertEqual(len(rows[0].findChildren(QLabel, "MessageTime")), 1)
         self.assertEqual(len(rows[1].findChildren(QLabel, "MessageTime")), 1)
+
+    def test_switching_long_group_history_keeps_rows_unclipped(self) -> None:
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import ChatPane
+        from client.v2.widgets import MessageBubble, UserAvatar
+
+        store = AppStore()
+        store.state.current_user = {"id": 1, "role": "user"}
+        short = ConversationKey("group", "short")
+        long = ConversationKey("group", "long")
+        store.state.messages[short] = []
+        store.state.messages[long] = [
+            {"id": index, "sender_id": index % 3 + 1, "sender_name": "member",
+             "message_type": "text", "content": "群聊消息 " * 12,
+             "created_at": 1000 + index * 300}
+            for index in range(1, 81)
+        ]
+        store.state.messages[long].append({
+            "id": 81, "sender_id": None, "sender_name": "AI Agent",
+            "sender_kind": "agent", "message_type": "agent", "content": "总结",
+            "card": {"kind": "summary", "title": "群聊总结", "parse_error": True},
+            "created_at": 26000,
+        })
+        pane = ChatPane(ChatService(NetworkClient("127.0.0.1", 9), store), store)
+        pane.resize(760, 620)
+        pane.show()
+        for key in (short, long, short, long):
+            pane.set_conversation(key, "群聊")
+            self.app.processEvents()
+
+        rows = pane.findChildren(QWidget, "MessageRow")
+        self.assertEqual(len(rows), 81)
+        self.assertGreater(pane.scroll.verticalScrollBar().maximum(), 0)
+        self.assertGreaterEqual(pane.message_content.height(), pane.messages.minimumSize().height())
+        for row in rows:
+            bubble = row.findChild(MessageBubble)
+            avatar = row.findChild(UserAvatar)
+            self.assertIsNotNone(bubble)
+            self.assertIsNotNone(avatar)
+            self.assertGreaterEqual(row.height(), row.minimumHeight())
+            self.assertGreaterEqual(row.height(), bubble.height())
+            self.assertGreaterEqual(row.height(), avatar.height())
 
     def test_sticker_uses_standalone_renderer_not_text_bubble(self) -> None:
         from client.v2.widgets import MessageBubble
@@ -903,6 +976,43 @@ class V2UiTests(unittest.TestCase):
         self.assertTrue(card.property("selected"))
         card.close()
 
+    def test_private_conversation_card_uses_cached_user_avatar(self) -> None:
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import ConversationPane
+
+        encoded = (
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+            "+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        )
+        store = AppStore()
+        store.state.current_user = {"id": 1, "username": "alice"}
+        store.state.users = [
+            {
+                "id": 2,
+                "username": "摸底鳄鱼",
+                "display_name": "摸底鳄鱼",
+                "avatar_version": 1,
+                "avatar_mime": "image/png",
+            }
+        ]
+        store.state.avatar_cache[2] = {
+            "user_id": 2,
+            "avatar_version": 1,
+            "image_data": encoded,
+        }
+        service = ChatService(NetworkClient("127.0.0.1", 9), store)
+        pane = ConversationPane(service, store)
+        key = ConversationKey("private", "dm:1:2")
+        pane.set_conversations([ConversationSummary(key, "摸底鳄鱼")])
+        self.app.processEvents()
+
+        card = pane._cards[key]
+        self.assertEqual(card._avatar._image_data, encoded)
+        self.assertFalse(card._avatar.pixmap().isNull())
+        pane.close()
+
     def test_workspace_responsive_minimum(self) -> None:
         from client.network import NetworkClient
         from client.service import ChatService
@@ -945,7 +1055,7 @@ class V2UiTests(unittest.TestCase):
 
         self.assertEqual(workspace.rail.width(), 80)
         self.assertIsNone(workspace.rail.findChild(QLabel, "BrandMark"))
-        self.assertEqual([button.text() for button in workspace.nav_buttons], ["消息", "通讯", "AI", "管理", "设置"])
+        self.assertEqual([button.text() for button in workspace.nav_buttons], ["消息", "通讯", "AI", "管理", "待办", "设置"])
         self.assertTrue(all(isinstance(button, QToolButton) for button in workspace.nav_buttons))
         for button in workspace.nav_buttons:
             self.assertEqual(button.size(), QSize(64, 60))
@@ -989,7 +1099,7 @@ class V2UiTests(unittest.TestCase):
         admin_state = AppState(current_user={"id": 1, "role": "admin"})
         workspace.update_state("auth", admin_state)
         self.assertTrue(workspace.nav_buttons[3].isVisible())
-        self.assertGreater(workspace.nav_buttons[4].y(), workspace.nav_buttons[3].y() + 60)
+        self.assertGreater(workspace.nav_buttons[5].y(), workspace.nav_buttons[4].y() + 60)
         workspace.close()
 
     def test_scroll_surfaces_override_dark_system_palette(self) -> None:
@@ -1135,6 +1245,53 @@ class V2UiTests(unittest.TestCase):
         rendered = bubble.content_label.text()
         self.assertIn("&lt;b&gt;普通&lt;/b&gt;", rendered)
         self.assertIn("font-weight:600", rendered)
+
+    def test_mention_popup_works_without_space_before_at(self) -> None:
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import ChatPane
+        from client.v2.widgets import MentionTextEdit
+
+        for prefix in ("明天联系", "hello", "😀", "请看，"):
+            editor = MentionTextEdit()
+            queries: list[str] = []
+            editor.mention_query.connect(queries.append)
+            editor.insertPlainText(f"{prefix}@")
+            self.app.processEvents()
+            self.assertEqual(queries[-1], "")
+            editor.insertPlainText("bo")
+            self.app.processEvents()
+            self.assertEqual(queries[-1], "bo")
+            editor.insert_mention(
+                {"id": 2, "member_id": "user:2", "username": "bob01", "kind": "user"}
+            )
+            self.assertEqual(editor.toPlainText(), f"{prefix}@bob01 ")
+            self.assertEqual(editor.mentions()[0]["start"], len(prefix))
+            queries.clear()
+            editor.set_content(f"{prefix}@bob01", [{
+                "member_id": "user:2", "kind": "user", "display": "bob01",
+                "start": len(prefix), "length": 6,
+            }])
+            self.app.processEvents()
+            self.assertEqual(queries, [])
+            editor.close()
+
+        store = AppStore()
+        store.state.current_user = {"id": 1, "username": "alice"}
+        store.state.members_by_group["7"] = [
+            {"id": 2, "member_id": "user:2", "kind": "user", "username": "bob01"}
+        ]
+        pane = ChatPane(ChatService(NetworkClient("127.0.0.1", 9), store), store)
+        pane.set_conversation(ConversationKey("group", "7"), "群聊")
+        pane.show()
+        pane.compose.insertPlainText("明天联系@")
+        self.app.processEvents()
+        self.assertTrue(pane.mention_list.isVisible())
+        pane.compose.insertPlainText("bo")
+        self.app.processEvents()
+        self.assertEqual(pane.mention_list.currentItem().text(), "bob01")
+        pane.close()
 
     def test_chat_pane_filters_members_and_accepts_agent_with_keyboard(self) -> None:
         from PySide6.QtTest import QTest
@@ -1624,6 +1781,19 @@ class V2UiTests(unittest.TestCase):
         self.assertEqual(page.filter_summary.text(), "1 个任务")
         self.assertLess(page.type_filter.findData("question"), 0)
 
+    def test_ai_task_dialog_accepts_optional_time_range(self) -> None:
+        from client.v2.application import NewAgentTaskDialog
+
+        key = ConversationKey("group", "7")
+        dialog = NewAgentTaskDialog([ConversationSummary(key, "测试群")])
+        dialog.time_range.setText("昨天下午")
+        selected, prompt = dialog.request()
+        self.assertEqual(selected, key)
+        self.assertEqual(prompt, "总结昨天下午的消息")
+        dialog.task_type.setCurrentIndex(1)
+        _selected, todo_prompt = dialog.request()
+        self.assertEqual(todo_prompt, "提取昨天下午的待办")
+
     def test_test_notification_uses_the_application_tray(self) -> None:
         from client.v2.application import MainWindow
 
@@ -1667,15 +1837,34 @@ class V2UiTests(unittest.TestCase):
         self.assertEqual(planned, [])
         self.assertNotIn("已分离", labels)
         self.assertEqual(page.theme_mode.count(), 3)
-        self.assertIsNotNone(page.enter_to_send)
+        self.assertIsNotNone(page.send_shortcut)
+        self.assertNotIn("当前固定", labels)
+        self.assertEqual(page.send_shortcut.count(), 2)
+        from PySide6.QtCore import QSettings
+        settings = QSettings()
+        old_send_shortcut = settings.value("chat/enter_to_send")
+        try:
+            self.assertEqual(
+                page.send_shortcut.currentData(),
+                settings.value("chat/enter_to_send", True, type=bool),
+            )
+            page.send_shortcut.setCurrentIndex(page.send_shortcut.findData(False))
+            self.assertFalse(settings.value("chat/enter_to_send", type=bool))
+            self.assertEqual(page.send_shortcut_hint.text(), "Enter 换行")
+            page.send_shortcut.setCurrentIndex(page.send_shortcut.findData(True))
+            self.assertTrue(settings.value("chat/enter_to_send", type=bool))
+            self.assertEqual(page.send_shortcut_hint.text(), "Shift+Enter 换行")
+        finally:
+            if old_send_shortcut is None:
+                settings.remove("chat/enter_to_send")
+            else:
+                settings.setValue("chat/enter_to_send", old_send_shortcut)
         self.assertIsNotNone(page.message_density)
         self.assertIsNotNone(page.export_diagnostics)
         self.assertIsNotNone(page.test_notification)
         self.assertIsNotNone(page.notify_enabled)
         self.assertIsNotNone(page.do_not_disturb)
         self.assertIsNotNone(page.notify_sound)
-
-        from PySide6.QtCore import QSettings
 
         density_values: list[str] = []
         page.density_changed.connect(density_values.append)
@@ -1706,6 +1895,47 @@ class V2UiTests(unittest.TestCase):
         QApplication.sendEvent(editor, commit)
         self.app.processEvents()
         self.assertEqual(queries[-1], "小")
+
+    def test_send_shortcut_modes_and_default_newline(self) -> None:
+        from PySide6.QtTest import QTest
+
+        from client.v2.widgets import MentionTextEdit
+
+        editor = MentionTextEdit()
+        sent: list[bool] = []
+        editor.send_requested.connect(lambda: sent.append(True))
+        with patch("client.v2.widgets.QSettings") as settings:
+            settings.return_value.value.side_effect = lambda _key, default, **_kwargs: default
+            QTest.keyClick(editor, Qt.Key.Key_Return)
+            self.assertEqual(sent, [True])
+            self.assertEqual(editor.toPlainText(), "")
+            QTest.keyClick(editor, Qt.Key.Key_Return, Qt.KeyboardModifier.ShiftModifier)
+            self.assertEqual(sent, [True])
+            self.assertEqual(editor.toPlainText(), "\n")
+
+            editor.clear()
+            sent.clear()
+            settings.return_value.value.side_effect = lambda _key, _default, **_kwargs: False
+            QTest.keyClick(editor, Qt.Key.Key_Return)
+            self.assertEqual(sent, [])
+            self.assertEqual(editor.toPlainText(), "\n")
+            QTest.keyClick(editor, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+            QTest.keyClick(editor, Qt.Key.Key_Enter, Qt.KeyboardModifier.MetaModifier)
+            self.assertEqual(sent, [True, True])
+            editor.clear()
+            sent.clear()
+            settings.return_value.value.side_effect = lambda _key, default, **_kwargs: default
+            editor.mention_popup_active = True
+            selected: list[int] = []
+            editor.mention_key.connect(selected.append)
+            QTest.keyClick(editor, Qt.Key.Key_Return, Qt.KeyboardModifier.ShiftModifier)
+            self.assertEqual(editor.toPlainText(), "\n")
+            self.assertEqual(sent, [])
+            self.assertEqual(selected, [])
+            QTest.keyClick(editor, Qt.Key.Key_Return)
+            self.assertEqual(selected, [0])
+            self.assertEqual(sent, [])
+        editor.close()
 
     def test_mention_copy_paste_preserves_identity_and_partial_delete_is_atomic(self) -> None:
         from PySide6.QtCore import QByteArray, QMimeData

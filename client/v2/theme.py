@@ -201,6 +201,67 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QScrollArea#ProfileCardScroll, QWidget#ProfileCardViewport {{ background: transparent; border: none; }}
     QFrame#TaskRow {{ background: transparent; border: none; border-bottom: 1px solid {c.border}; border-radius: 0; }}
     QFrame#TaskRow:hover {{ background: {c.surface_subtle}; }}
+    QFrame#TodoWorkspace {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 12px; }}
+    QLabel#TodoPageTitle {{ color: {c.text_primary}; font-size: 26px; font-weight: 700; }}
+    QLabel#TodoSummary {{ color: {c.text_secondary}; font-size: 13px; padding-left: 4px; }}
+    QLineEdit#TodoQuickInput {{ min-height: 26px; padding: 8px 12px; background: {c.surface}; border: 1px solid {c.border_strong}; border-radius: 8px; font-size: 14px; }}
+    QLineEdit#TodoQuickInput:focus {{ border: 2px solid {c.primary}; padding: 7px 11px; }}
+    QPushButton#TodoAddButton {{ min-height: 28px; padding: 8px 20px; color: {c.surface}; background: {c.primary}; border: 1px solid {c.primary}; border-radius: 8px; font-weight: 600; }}
+    QPushButton#TodoAddButton:hover {{ background: {c.primary_hover}; border-color: {c.primary_hover}; }}
+    QPushButton#TodoAddButton:pressed {{ background: {c.primary_pressed}; border-color: {c.primary_pressed}; }}
+    QPushButton#TodoAddButton:disabled {{ color: {c.text_disabled}; background: {c.surface_subtle}; border-color: {c.border}; }}
+    QPushButton#TodoChoice {{ min-height: 36px; padding: 0 31px 0 14px; text-align: left; color: {c.text_primary}; background: {c.surface}; border: 1px solid {c.border_strong}; border-radius: 18px; font-size: 13px; }}
+    QPushButton#TodoChoice:hover {{ background: {c.surface_subtle}; border-color: {c.primary}; }}
+    QPushButton#TodoChoice:pressed {{ background: {c.primary_subtle}; }}
+    QPushButton#TodoChoice:focus {{ border: 2px solid {c.primary}; padding: 0 30px 0 13px; }}
+    QPushButton#TodoChoice:disabled {{ color: {c.text_disabled}; background: {c.surface_subtle}; border-color: {c.border}; }}
+    QPushButton#TodoStatusChoice {{ color: {c.text_secondary}; }}
+    QMenu#TodoChoiceMenu {{ background: {c.surface_elevated}; color: {c.text_primary}; border: 1px solid {c.border_strong}; border-radius: 10px; padding: 6px; }}
+    QFrame#TodoRow {{ background: {c.surface}; border: none; border-bottom: 1px solid {c.border}; }}
+    QFrame#TodoRow:hover {{ background: {c.surface_subtle}; }}
+    QFrame#TodoRow[selected="true"] {{ background: {c.primary_subtle}; border: none; border-radius: 8px; }}
+    QPushButton#TodoTitle {{ min-height: 22px; padding: 0; background: transparent; border: 1px solid transparent; color: {c.text_primary}; text-align: left; font-size: 14px; font-weight: 600; }}
+    QPushButton#TodoTitle:hover {{ color: {c.primary}; }}
+    QPushButton#TodoTitle:focus {{ border: 1px solid {c.primary}; border-radius: 4px; }}
+    QFrame#TodoRow[completed="true"] QPushButton#TodoTitle {{ color: {c.text_tertiary}; }}
+    QLabel#TodoMeta, QLabel#TodoSource, QLabel#TodoCreatedAt {{ color: {c.text_tertiary}; font-size: 12px; background: transparent; }}
+    QLabel#TodoMeta[state="overdue"] {{ color: {c.danger}; }}
+    QLabel#TodoRowIcon, QLabel#TodoFieldIcon, QLabel#TodoFlag {{ background: transparent; border: none; }}
+    QFrame#TodoDetail {{ background: {c.surface}; border: none; border-left: 1px solid {c.border}; }}
+    QScrollArea#TodoListScroll, QScrollArea#TodoDetailScroll {{ background: {c.surface}; border: none; }}
+    QLabel#TodoCalendarMonth {{ color: {c.text_primary}; font-size: 14px; font-weight: 600; }}
+    QCalendarWidget {{ background: {c.surface_elevated}; color: {c.text_primary}; }}
+    QCalendarWidget QAbstractItemView {{ background: {c.surface_elevated}; color: {c.text_primary}; selection-background-color: {c.primary_subtle}; selection-color: {c.primary}; border: none; outline: none; }}
+    QFrame#TodoSection {{ background: {c.surface}; border: none; }}
+    QPushButton#TodoSectionToggle {{ color: {c.text_primary}; background: transparent; border: 1px solid transparent; padding: 0; font-size: 15px; font-weight: 600; text-align: left; }}
+    QPushButton#TodoSectionToggle:hover {{ color: {c.primary}; }}
+    QPushButton#TodoSectionToggle:focus {{ border: 1px solid {c.primary}; border-radius: 4px; }}
+    QLabel#TodoSectionCount {{ color: {c.text_secondary}; background: {c.surface_subtle}; border-radius: 10px; padding: 3px 8px; font-size: 12px; }}
+    QLabel#TodoPriorityBadge {{ background: {c.surface_subtle}; border-radius: 9px; padding: 3px 8px; font-size: 12px; font-weight: 600; }}
+    QLabel#TodoPriorityBadge[priority="high"] {{ color: {c.danger}; }}
+    QLabel#TodoPriorityBadge[priority="normal"] {{ color: {c.warning}; }}
+    QLabel#TodoPriorityBadge[priority="low"] {{ color: {c.primary}; }}
+    QLabel#TodoDoneBadge {{ color: {c.success}; background: {c.surface_subtle}; border-radius: 9px; padding: 3px 8px; font-size: 12px; }}
+    QLineEdit#TodoDetailTitle {{ color: {c.text_primary}; background: transparent; border: 1px solid transparent; padding: 2px 0; min-height: 38px; font-size: 20px; font-weight: 700; }}
+    QLineEdit#TodoDetailTitle:hover {{ border-bottom: 1px solid {c.border_strong}; }}
+    QLineEdit#TodoDetailTitle:focus {{ border: 1px solid {c.primary}; border-radius: 4px; padding: 1px 4px; }}
+    QTextEdit#TodoDescription {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 8px; padding: 8px; }}
+    QLineEdit#TodoDateInput {{ min-height: 24px; padding: 7px 10px; }}
+    QLabel#TodoFieldLabel {{ color: {c.text_secondary}; font-size: 13px; font-weight: 600; background: transparent; }}
+    QPushButton#TodoLink {{ color: {c.primary}; background: transparent; border: none; padding: 0; text-align: left; font-size: 13px; }}
+    QPushButton#TodoLink:hover {{ color: {c.primary_hover}; }}
+    QPushButton#TodoLink:focus {{ border-bottom: 2px solid {c.primary}; }}
+    QToolButton#TodoIconButton {{ color: {c.text_secondary}; background: transparent; border: 1px solid transparent; border-radius: 6px; min-width: 32px; min-height: 32px; }}
+    QToolButton#TodoIconButton:hover {{ background: {c.surface_subtle}; }}
+    QToolButton#TodoIconButton:pressed {{ background: {c.primary_subtle}; }}
+    QToolButton#TodoIconButton:focus {{ border: 2px solid {c.primary}; }}
+    QToolButton#TodoIconButton:disabled {{ background: transparent; }}
+    QLabel#TodoEmpty {{ color: {c.text_secondary}; font-size: 14px; background: transparent; }}
+    QLabel#TodoEmptyIcon {{ background: transparent; }}
+    QLabel#TodoFeedback {{ color: {c.text_secondary}; background: {c.surface_subtle}; border: 1px solid {c.border}; border-radius: 8px; padding: 7px 10px; font-size: 12px; }}
+    QLabel#TodoFeedback[state="error"] {{ color: {c.danger}; }}
+    QLabel#TodoFeedback[state="offline"] {{ color: {c.warning}; }}
+    QFrame#TodoDetailFooter {{ background: {c.surface}; border: none; border-top: 1px solid {c.border}; }}
     QFrame#SettingsSection {{ background: transparent; border: none; border-bottom: 1px solid {c.border}; }}
     QFrame#SettingsRow {{ background: transparent; border: none; }}
     QFrame#Rail {{ background: {c.surface}; border: none; border-right: 1px solid {c.border}; }}
@@ -214,6 +275,7 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QLabel#ProfileName {{ font-size: 20px; font-weight: 700; }}
     QLabel#MetricValue {{ font-size: 26px; font-weight: 700; }}
     QLabel#EmptyStateIcon {{ font-size: 42px; }}
+    QLabel#EmptyStateWordmark {{ font-size: 28px; font-weight: 700; }}
     QLabel#EmptyStateTitle {{ font-size: 18px; font-weight: 700; }}
     QLabel#AuthBrandTile {{ background: {c.primary_subtle}; border: 1px solid {c.border}; border-radius: 12px; }}
     QLabel#AuthWordmark {{ font-size: 16px; font-weight: 700; }}
@@ -287,6 +349,27 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QFrame#CardTaskRow {{ background: transparent; border: none; border-bottom: 1px solid {c.border}; border-radius: 0; }}
     QLabel#CardTaskTitle {{ color: {c.text_primary}; font-size: 13px; font-weight: 600; }}
     QLabel#CardTaskMeta {{ color: {c.text_tertiary}; font-size: 11px; }}
+    QLabel#CardTaskDescription {{ color: {c.text_secondary}; font-size: 12px; }}
+    QWidget#CardTaskContent, QWidget#CardTaskPriorityRow {{ background: transparent; border: none; }}
+    QLabel#CardTaskPriority {{ color: {c.text_secondary}; font-size: 11px; font-weight: 600; }}
+    QLabel#CardTaskPriority[priority="high"] {{ color: {c.danger}; }}
+    QLabel#CardTaskPriority[priority="normal"] {{ color: {c.warning}; }}
+    QLabel#CardTaskPriority[priority="low"] {{ color: {c.primary}; }}
+    QLabel#CardTaskPriorityFlag {{ background: transparent; }}
+    QLabel#CardTaskPriorityBasis {{ color: {c.warning}; background: {c.surface_subtle}; border-radius: 7px; padding: 1px 5px; font-size: 10px; }}
+    QLabel#CardTaskStatus {{ color: {c.text_tertiary}; background: {c.surface_subtle}; border-radius: 7px; padding: 1px 6px; font-size: 10px; }}
+    QLabel#CardTaskSyncState {{ color: {c.success}; font-size: 11px; font-weight: 600; }}
+    QFrame#CardImportNotice {{ background: {c.surface_subtle}; border: none; border-radius: 7px; }}
+    QLabel#CardImportFeedback {{ color: {c.text_secondary}; background: transparent; font-size: 11px; }}
+    QFrame#CardImportNotice[state="success"] QLabel#CardImportFeedback {{ color: {c.success}; }}
+    QFrame#CardImportNotice[state="failure"] QLabel#CardImportFeedback {{ color: {c.danger}; }}
+    QFrame#CardImportNotice[state="partial"] QLabel#CardImportFeedback {{ color: {c.warning}; }}
+    QFrame#CardImportNotice[state="pending"] QLabel#CardImportFeedback {{ color: {c.primary}; }}
+    QPushButton#CardImportAction {{ min-height: 28px; padding: 0 10px; border: 1px solid {c.primary}; border-radius: 7px; background: {c.primary_subtle}; color: {c.primary}; font-size: 12px; font-weight: 600; }}
+    QPushButton#CardImportAction:hover {{ background: {c.primary}; color: {c.surface}; }}
+    QPushButton#CardImportAction:disabled {{ color: {c.text_disabled}; background: {c.surface_subtle}; border-color: {c.border}; }}
+    QPushButton#CardTaskTodoAction {{ min-height: 22px; padding: 0 4px; border: none; border-radius: 5px; background: transparent; color: {c.primary}; font-size: 11px; }}
+    QPushButton#CardTaskTodoAction:hover {{ background: {c.primary_subtle}; }}
     QPushButton {{ min-height: 34px; padding: 0 14px; border: 1px solid {c.border}; border-radius: 8px; background: {c.surface}; color: {c.text_primary}; }}
     QPushButton:hover {{ background: {c.surface_subtle}; border-color: {c.border_strong}; }}
     QPushButton:pressed {{ background: {c.primary_subtle}; }}
@@ -323,8 +406,8 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QToolButton#NavItem:focus {{ border: 1px solid transparent; border-bottom: 2px solid {c.primary}; }}
     QToolButton#NavItem:disabled {{ color: {c.text_disabled}; background: transparent; }}
     QPushButton#DangerButton {{ color: {c.danger}; }}
-    QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox {{ color: {c.text_primary}; background: {c.surface}; border: 1px solid {c.border}; border-radius: 8px; padding: 8px 10px; selection-background-color: {c.primary}; selection-color: {c.surface}; }}
-    QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QComboBox:focus {{ border: 2px solid {c.primary}; }}
+    QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox, QDateTimeEdit, QTimeEdit {{ color: {c.text_primary}; background: {c.surface}; border: 1px solid {c.border}; border-radius: 8px; padding: 8px 10px; selection-background-color: {c.primary}; selection-color: {c.surface}; }}
+    QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QComboBox:focus, QDateTimeEdit:focus, QTimeEdit:focus {{ border: 2px solid {c.primary}; }}
     QLineEdit:disabled, QTextEdit:disabled, QComboBox:disabled {{ color: {c.text_disabled}; background: {c.surface_subtle}; }}
     QTextEdit#ComposerInput {{ background: {c.surface_subtle}; border-color: {c.border}; border-radius: 8px; padding: 10px 12px; }}
     QTextEdit#ComposerInput:focus {{ background: {c.surface}; border: 2px solid {c.primary}; }}

@@ -157,6 +157,32 @@ class Database:
                     event_type TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_message_events_message ON message_events(message_id);
+                CREATE TABLE IF NOT EXISTS personal_todos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    title TEXT NOT NULL,
+                    normalized_title TEXT NOT NULL DEFAULT '',
+                    description TEXT NOT NULL DEFAULT '',
+                    due_at REAL,
+                    priority TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('low','normal','high')),
+                    completed_at REAL,
+                    source_type TEXT NOT NULL DEFAULT 'manual' CHECK(source_type IN ('manual','agent_extracted','chat_message')),
+                    source_conversation_type TEXT,
+                    source_conversation_id TEXT,
+                    source_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+                    idempotency_key TEXT,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    manual_revision INTEGER NOT NULL DEFAULT 0,
+                    last_modified_by TEXT NOT NULL DEFAULT 'manual',
+                    created_by_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_personal_todos_owner ON personal_todos(owner_id,completed_at,due_at);
+                CREATE TABLE IF NOT EXISTS todo_revisions (
+                    owner_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                    revision INTEGER NOT NULL DEFAULT 0
+                );
                 CREATE TABLE IF NOT EXISTS read_cursors (
                     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                     conversation_type TEXT NOT NULL,
@@ -403,6 +429,30 @@ class Database:
                 conn.execute("ALTER TABLE tool_calls ADD COLUMN agent_id TEXT")
             if "tool_mode" not in tool_columns:
                 conn.execute("ALTER TABLE tool_calls ADD COLUMN tool_mode TEXT NOT NULL DEFAULT 'auto'")
+            todo_columns = {
+                str(row["name"])
+                for row in conn.execute("PRAGMA table_info(personal_todos)").fetchall()
+            }
+            for column, declaration in (
+                ("normalized_title", "TEXT NOT NULL DEFAULT ''"),
+                ("idempotency_key", "TEXT"),
+                ("version", "INTEGER NOT NULL DEFAULT 1"),
+                ("manual_revision", "INTEGER NOT NULL DEFAULT 0"),
+                ("last_modified_by", "TEXT NOT NULL DEFAULT 'manual'"),
+                (
+                    "created_by_agent_id",
+                    "TEXT REFERENCES agents(id) ON DELETE SET NULL",
+                ),
+            ):
+                if column not in todo_columns:
+                    conn.execute(
+                        f"ALTER TABLE personal_todos ADD COLUMN {column} {declaration}"
+                    )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_personal_todos_idempotency "
+                "ON personal_todos(owner_id,idempotency_key) "
+                "WHERE idempotency_key IS NOT NULL AND idempotency_key<>''"
+            )
             agent_columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(agents)")}
             if "auto_sticker" not in agent_columns:
                 conn.execute("ALTER TABLE agents ADD COLUMN auto_sticker INTEGER NOT NULL DEFAULT 1")
@@ -2074,20 +2124,44 @@ class Database:
         )
         return message
 
-    def recent_history(self, user_id: int, conversation_type: str, conversation_id: str, limit: int = 50, *, after_id: int = 0) -> list[dict[str, Any]]:
+    def recent_history(
+        self,
+        user_id: int,
+        conversation_type: str,
+        conversation_id: str,
+        limit: int = 50,
+        *,
+        after_id: int = 0,
+        since: float | None = None,
+        until: float | None = None,
+    ) -> list[dict[str, Any]]:
         self._assert_access(user_id, conversation_type, conversation_id)
-        limit = max(1, min(int(limit), 200))
+        limit = max(1, min(int(limit), 500))
+        conditions = [
+            "conversation_type=?",
+            "conversation_id=?",
+            "recalled_at IS NULL",
+        ]
+        params: list[Any] = [conversation_type, conversation_id]
+        if after_id:
+            conditions.append("id>?")
+            params.append(after_id)
+        if since is not None:
+            conditions.append("created_at>=?")
+            params.append(float(since))
+        if until is not None:
+            conditions.append("created_at<?")
+            params.append(float(until))
+        params.append(limit)
         with self._connect() as conn:
-            if after_id:
-                rows = conn.execute(
-                    """SELECT * FROM messages WHERE conversation_type=? AND conversation_id=? AND id>? AND recalled_at IS NULL ORDER BY id ASC LIMIT ?""",
-                    (conversation_type, conversation_id, after_id, limit),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """SELECT * FROM messages WHERE conversation_type=? AND conversation_id=? AND recalled_at IS NULL ORDER BY id DESC LIMIT ?""",
-                    (conversation_type, conversation_id, limit),
-                ).fetchall()[::-1]
+            chronological = bool(after_id or since is not None or until is not None)
+            order = "ASC" if chronological else "DESC"
+            rows = conn.execute(
+                f"SELECT * FROM messages WHERE {' AND '.join(conditions)} ORDER BY id {order} LIMIT ?",
+                tuple(params),
+            ).fetchall()
+            if not chronological:
+                rows = rows[::-1]
         return [self._message_dict(row) for row in rows]
 
     def search_messages(self, user_id: int, conversation_type: str, conversation_id: str, keyword: str, limit: int = 50, before_id: int | None = None, *, paged: bool = False) -> Any:

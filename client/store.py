@@ -51,12 +51,16 @@ class AppStore:
         if not isinstance(payload, dict):
             payload = {}
         request_id = str(event.get("request_id", ""))
+        pending_action = self.state.pending.get(request_id, "")
         if event_type == "network.send_failed":
             failed_id = str(payload.get("request_id", ""))
             if failed_id in self.state.private_outbox:
                 self.state.private_outbox[failed_id]["status"] = "uncertain"
                 self.notify("private_outbox")
             self.state.pending.pop(failed_id, None)
+            if str(payload.get("type", "")).startswith("todo."):
+                self.state.todo_error = "待办请求发送失败，请重试"
+                self.notify("todos")
             self.state.failed_send = self.state.pending_sends.pop(failed_id, None)
             self.state.last_error = "发送状态不确定；重连后请核对消息列表，再决定是否重试"
             self.notify("send_failed")
@@ -116,8 +120,16 @@ class AppStore:
                 self.state.last_error = str(payload.get("message", "认证失败"))
                 self.notify("auth")
                 return
+            previous_user_id = self.state.current_user.get("id")
             self.state.authenticated = True
             self.state.current_user = dict(payload.get("user") or {})
+            if previous_user_id != self.state.current_user.get("id"):
+                self.state.todos = []
+                self.state.todo_revision = 0
+                self.state.todo_import_results = {}
+            self.state.todos_loaded = False
+            self.state.todo_error = ""
+            self.state.todo_needs_refresh = False
             self.state.capabilities = dict(payload.get("capabilities") or {})
             self.state.users = [dict(item) for item in payload.get("users", [])]
             self.state.groups = [dict(item) for item in payload.get("groups", [])]
@@ -129,6 +141,53 @@ class AppStore:
             self.state.event_cursor = max(self.state.event_cursor, int(payload.get("event_cursor", 0)))
             self.state.events_has_more = bool(payload.get("events_has_more", False))
             self.notify("auth")
+            return
+        if event_type == "todo.list":
+            revision = int(payload.get("revision", 0))
+            if revision >= self.state.todo_revision:
+                self.state.todos = [dict(item) for item in payload.get("todos", []) if isinstance(item, dict)]
+                self.state.todo_revision = revision
+                self.state.todo_needs_refresh = False
+            self.state.todos_loaded = True
+            self.state.todo_error = ""
+            self.notify("todos")
+            return
+        if event_type in {"todo.created", "todo.updated", "todo.changed", "todo.deleted", "todo.removed"}:
+            owner_id = payload.get("owner_id")
+            if isinstance(payload.get("todo"), dict):
+                owner_id = payload["todo"].get("owner_id", owner_id)
+            current_id = self.state.current_user.get("id")
+            if owner_id is not None and current_id is not None and str(owner_id) != str(current_id):
+                self.state.todo_needs_refresh = True
+                self.notify("todos")
+                return
+            revision = int(payload.get("revision", 0))
+            if revision > self.state.todo_revision:
+                if revision > self.state.todo_revision + 1 and self.state.todos_loaded:
+                    self.state.todo_needs_refresh = True
+                if event_type in {"todo.deleted", "todo.removed"}:
+                    todo_id = int(payload.get("todo_id", 0))
+                    self.state.todos = [item for item in self.state.todos if int(item.get("id", 0)) != todo_id]
+                elif isinstance(payload.get("todo"), dict):
+                    todo = dict(payload["todo"])
+                    self.state.todos = [item for item in self.state.todos if item.get("id") != todo.get("id")]
+                    self.state.todos.append(todo)
+                self.state.todo_revision = revision
+            self.state.todo_error = ""
+            self.notify("todos")
+            return
+        if event_type == "todo.resolved":
+            self.state.todo_target = dict(payload)
+            self.notify("todo_target")
+            return
+        if event_type == "todo.imported":
+            try:
+                message_id = int(payload.get("message_id", 0))
+            except (TypeError, ValueError):
+                message_id = 0
+            if message_id:
+                self.state.todo_import_results[message_id] = dict(payload)
+            self.notify("todo_import")
             return
         if event_type == "history.events":
             self._apply_events(payload.get("events", []))
@@ -464,6 +523,9 @@ class AppStore:
             return
         if event_type == "error":
             message = str(payload.get("message", payload.get("error", "请求失败")))
+            if pending_action.startswith("todo."):
+                self.state.todo_error = message
+                self.notify("todos")
             if message in {"未知消息类型：profile.identity.set", "未知消息类型：group.nickname.set"}:
                 message = "服务端版本过旧，请重启服务端后重试"
             self.state.last_error = message

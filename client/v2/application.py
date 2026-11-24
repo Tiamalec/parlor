@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLabel,
     QLineEdit,
+    QLayout,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -63,6 +64,9 @@ from client.store import AppStore
 from client.drafts import Draft, DraftStore
 
 from .icons import NAVIGATION_ICONS, brand_app_icon, brand_logo_icon, lucide_icon, lucide_icon_with_color
+from .agent_cards import TodoCard
+from .time_text import format_message_time
+from .personal_todo import PersonalTodoPage
 from .theme import (
     ThemeMode,
     ThemeSnapshot,
@@ -75,6 +79,7 @@ from .profile_widgets import ProfilePopover, UserProfileCard, build_profile_menu
 from .stickers import LocalStickerLibrary, MAX_STICKER_SIZE, StickerPanel
 from .widgets import (
     Avatar,
+    BrandLockup,
     ConversationCard,
     EmptyState,
     MentionTextEdit,
@@ -464,8 +469,14 @@ class AuthPage(QWidget):
 class ConversationPane(QFrame):
     selected = Signal(object)
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        service: ChatService | None = None,
+        store: AppStore | None = None,
+    ) -> None:
         super().__init__()
+        self.service = service
+        self.store = store
         self.setObjectName("Surface")
         self.setMinimumWidth(280)
         self.setMaximumWidth(340)
@@ -578,6 +589,7 @@ class ConversationPane(QFrame):
                 self._cards[summary.key] = card
             elif card.summary != summary:
                 card.update_summary(summary)
+            self._apply_summary_avatar(card, summary)
             card.set_draft_preview(self._draft_previews.get(summary.key, ""))
             card.set_selected(summary.key == self._selected_key)
             visible_keys.append(summary.key)
@@ -596,6 +608,35 @@ class ConversationPane(QFrame):
             self.cards.insertWidget(index, card)
             card.show()
 
+    def _apply_summary_avatar(
+        self, card: ConversationCard, summary: ConversationSummary
+    ) -> None:
+        if summary.key.kind == "group":
+            card.set_avatar(summary.title, group=True)
+            return
+        if self.service is None or self.store is None:
+            card.set_avatar(summary.title, group=False)
+            return
+        peer_id = summary.key.peer_user_id(
+            self.store.state.current_user.get("id")
+        )
+        if peer_id is None:
+            card.set_avatar(summary.title, group=False)
+            return
+        profile = self.service.profile(
+            peer_id,
+            {
+                "kind": "user",
+                "username": summary.title,
+                "display_name": summary.title,
+            },
+        )
+        card.set_avatar(
+            profile.display_name or summary.title,
+            self.service.avatar_data(profile),
+            group=False,
+        )
+
 
 class DetailsScrim(QFrame):
     clicked = Signal()
@@ -612,6 +653,7 @@ class DetailsScrim(QFrame):
 class ChatPane(QWidget):
     conversation_list_requested = Signal()
     latest_viewed = Signal()
+    todo_open_requested = Signal(int)
     draft_preview_changed = Signal(object, str)
     drafts_loaded = Signal(object)
 
@@ -643,6 +685,7 @@ class ChatPane(QWidget):
         self._render_pending_count_new = False
         self._render_pending_force = False
         self._auto_media_requested: set[int] = set()
+        self._todo_import_requests: dict[str, int] = {}
         self._message_rows: dict[int, QWidget] = {}
         self._conversation_views: dict[ConversationKey, dict[str, Any]] = {}
         self._pending_view_restore = False
@@ -723,6 +766,10 @@ class ChatPane(QWidget):
         self.scroll.setWidgetResizable(True)
         self.message_content = QWidget()
         self.messages = QVBoxLayout(self.message_content)
+        # The scroll widget must grow to the rows' minimum height before Qt
+        # lays out a newly selected conversation. Otherwise a stale viewport
+        # height can squeeze every message into a thin clipped strip.
+        self.messages.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         self.messages.setAlignment(Qt.AlignmentFlag.AlignBottom)
         self.messages.setContentsMargins(*MESSAGE_DENSITY_MARGINS[self._density])
         self.messages.setSpacing(MESSAGE_DENSITY_SPACING[self._density])
@@ -848,8 +895,6 @@ class ChatPane(QWidget):
         self.compose.textChanged.connect(self._update_private_typing)
         self.compose.composition_state_changed.connect(self._composition_state_changed)
         self.mention_list.itemClicked.connect(self._choose_mention)
-        QShortcut(QKeySequence("Ctrl+Return"), self.compose, activated=self._send)
-        QShortcut(QKeySequence("Meta+Return"), self.compose, activated=self._send)
         QShortcut(QKeySequence("Escape"), self, activated=self._hide_details)
         self._emoji_menu()
         self._ai_menu()
@@ -1283,6 +1328,34 @@ class ChatPane(QWidget):
                 else f"{original.get('sender_name', '')}: {_message_preview(original)}"
             )
             displayed = {**message, "reply_preview": preview}
+        if message_card_kind(displayed) == "todo" and isinstance(displayed.get("card"), dict):
+            current = self.store.state.current_user
+            current_id = str(current.get("id") or "")
+            identity = next(
+                (
+                    item
+                    for item in self.store.state.members_by_group.get(self.key.identifier, [])
+                    if str(item.get("id") or "") == current_id
+                ),
+                {},
+            )
+            current_name = (
+                identity.get("nickname")
+                or identity.get("display_name")
+                or current.get("display_name")
+                or current.get("username")
+                or ""
+            )
+            displayed = {
+                **displayed,
+                "card": {
+                    **displayed["card"],
+                    "current_user_id": current.get("id"),
+                    "current_user_name": current_name,
+                    "requester_id": current.get("id"),
+                    "requester_name": current_name,
+                },
+            }
         bubble = MessageBubble(
             displayed, mine=mine, can_recall=can_recall, density=self._density
         )
@@ -1292,6 +1365,16 @@ class ChatPane(QWidget):
         bubble.quote_requested.connect(self._focus_quoted_message)
         bubble.media_requested.connect(self.service.fetch_media)
         bubble.sources_requested.connect(self._focus_sources)
+        bubble.todo_import_requested.connect(self._import_todo_tasks)
+        bubble.todo_open_requested.connect(self.todo_open_requested.emit)
+        todo_card = getattr(bubble, "agent_card", None)
+        if isinstance(todo_card, TodoCard):
+            message_id = int(message.get("id", 0) or 0)
+            todo_card.set_runtime_context(
+                message_id,
+                self.store.state.todos,
+                self.store.state.todo_import_results.get(message_id),
+            )
         is_agent = message.get("sender_kind") == "agent" or message.get("message_type") == "agent"
         try:
             sender_id = 0 if is_agent else int(message.get("sender_id", 0) or 0)
@@ -1365,9 +1448,9 @@ class ChatPane(QWidget):
         else:
             column_layout.addWidget(bubble, alignment=content_alignment)
         stamp = _message_timestamp(message)
-        footer_text = (
-            time.strftime("%H:%M", time.localtime(stamp)) if stamp else ""
-        ) + (" · 已编辑" if message.get("edited") else "")
+        footer_text = format_message_time(stamp) + (
+            " · 已编辑" if message.get("edited") else ""
+        )
         if (self.key.kind == "private" and self.store.state.capabilities.get("private_chat_v2")
                 and mine and int(message.get("id", 0) or 0) == self._latest_outgoing_id):
             summary = next((item for item in self.store.state.conversations if item.key == self.key), None)
@@ -1385,8 +1468,8 @@ class ChatPane(QWidget):
         else:
             row_layout.addWidget(avatar, alignment=Qt.AlignmentFlag.AlignTop)
             row_layout.addWidget(message_column, 1 if card_kind else 0)
-            if not card_kind:
-                row_layout.addStretch()
+            row_layout.addStretch()
+        row.setMinimumHeight(row.sizeHint().height())
         self.messages.addWidget(row)
         message_id = int(message.get("id", message.get("message_id", 0)) or 0)
         if message_id:
@@ -1418,7 +1501,14 @@ class ChatPane(QWidget):
             previous = message
 
     def _set_empty_message_state(self, title: str, description: str) -> None:
-        self.messages.addWidget(EmptyState(title, description))
+        self.messages.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty = EmptyState(
+            title,
+            description,
+            mark=BrandLockup(),
+            body_width=280,
+        )
+        self.messages.addWidget(empty, alignment=Qt.AlignmentFlag.AlignCenter)
 
     def render_messages(self, *, count_new: bool = True, force: bool = False) -> None:
         if self._render_timer.isActive():
@@ -1539,6 +1629,7 @@ class ChatPane(QWidget):
             return
         if not records:
             if loading:
+                self.messages.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 loading_label = QLabel("正在加载消息…")
                 loading_label.setObjectName("Muted")
                 loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1551,6 +1642,7 @@ class ChatPane(QWidget):
             scrollbar.blockSignals(False)
             return
         my_id = str(self.store.state.current_user.get("id", ""))
+        self.messages.setAlignment(Qt.AlignmentFlag.AlignBottom)
         by_id = {int(item["id"]): item for item in records if item.get("id") is not None}
         can_manage = bool(
             self.key.kind == "group"
@@ -1831,6 +1923,17 @@ class ChatPane(QWidget):
         if valid:
             self._focus_quoted_message(min(valid))
 
+    def _import_todo_tasks(self, message_id: int, task_indices: list[int]) -> None:
+        request_id = self.service.import_todo_tasks(message_id, task_indices)
+        if request_id:
+            self._todo_import_requests[request_id] = message_id
+        self.store.state.todo_import_results[message_id] = {
+            "status": "pending" if request_id else "failed",
+            "request_id": request_id or "",
+            "error": "" if request_id else "待办请求发送失败",
+        }
+        self.store.notify("todo_import")
+
     def _restore_failed_send(self, state: AppState) -> None:
         failed = state.failed_send
         if failed is None:
@@ -1987,6 +2090,15 @@ class ChatPane(QWidget):
         if topic in {"conversations", "private_outbox", "private_read", "connection", "auth"}:
             self._refresh_private_state()
             self._refresh_private_outbox()
+        if topic == "todo_import":
+            self._todo_import_requests.clear()
+        elif topic == "todos" and state.todo_error and self._todo_import_requests:
+            for message_id in self._todo_import_requests.values():
+                state.todo_import_results[message_id] = {
+                    "status": "failed",
+                    "error": state.todo_error,
+                }
+            self._todo_import_requests.clear()
         if topic in {"private_read", "conversations"} and self.key and self.key.kind == "private":
             self.render_messages(count_new=False)
         if (
@@ -2012,6 +2124,8 @@ class ChatPane(QWidget):
             self._schedule_render(
                 count_new=True,
             )
+        elif topic in {"todos", "todo_import"}:
+            self._schedule_render(count_new=False, force=True)
         if topic in {"details", "profile", "agent", "agents", "pending", "error", "conversations"}:
             self.details.set_context(self.key, self.title_text, state, topic)
         if topic == "search" and self.key:
@@ -3022,7 +3136,15 @@ class NewAgentTaskDialog(QDialog):
         self.task_type.addItem("总结会话", "summary")
         self.task_type.addItem("提取待办", "todo")
         root.addWidget(self.task_type)
-        hint = QLabel("任务结果会显示在对应会话中；普通问答请直接在聊天里发起。")
+        root.addWidget(QLabel("时间范围（可选）"))
+        self.time_range = QLineEdit()
+        self.time_range.setPlaceholderText("例如：今天、昨天下午、最近 3 天、11月1日到11月5日")
+        self.time_range.setClearButtonEnabled(True)
+        root.addWidget(self.time_range)
+        hint = QLabel(
+            "不填时间范围时处理最近 50 条消息；任务结果会显示在对应会话中，"
+            "普通问答请直接在聊天里发起。"
+        )
         hint.setObjectName("Muted")
         hint.setWordWrap(True)
         root.addWidget(hint)
@@ -3034,10 +3156,17 @@ class NewAgentTaskDialog(QDialog):
     def request(self) -> tuple[ConversationKey | None, str]:
         key = self.scope.currentData()
         task_type = str(self.task_type.currentData())
-        prompts = {
-            "summary": "总结最近 50 条消息",
-            "todo": "提取最近 50 条消息中的待办",
-        }
+        time_range = self.time_range.text().strip()
+        if time_range:
+            prompts = {
+                "summary": f"总结{time_range}的消息",
+                "todo": f"提取{time_range}的待办",
+            }
+        else:
+            prompts = {
+                "summary": "总结最近 50 条消息",
+                "todo": "提取最近 50 条消息中的待办",
+            }
         return (key if isinstance(key, ConversationKey) else None, prompts.get(task_type, ""))
 
 
@@ -3577,7 +3706,9 @@ class AgentManagerDialog(QDialog):
             self.model_combo.addItem(label, model.get("id"))
         self.tool_list.clear()
         for tool in self.store.state.tool_definitions:
-            item = QListWidgetItem(f"{tool.get('label')}  ·  {'需确认' if tool.get('mode') == 'confirm' else '自动'}")
+            permission = "写入" if tool.get("permission") == "write" else "查询"
+            mode = "需确认" if tool.get("mode") == "confirm" else "自动"
+            item = QListWidgetItem(f"{tool.get('label')}  ·  {permission} · {mode}")
             item.setData(Qt.ItemDataRole.UserRole, str(tool.get("name")))
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Unchecked)
@@ -3623,8 +3754,10 @@ class AgentManagerDialog(QDialog):
             return
         self.tool_list.clear()
         for tool in tools:
+            permission = "写入" if tool.get("permission") == "write" else "查询"
+            mode = "需确认" if tool.get("mode") == "confirm" else "自动"
             item = QListWidgetItem(
-                f"{tool.get('label')}  ·  {'需确认' if tool.get('mode') == 'confirm' else '自动'}"
+                f"{tool.get('label')}  ·  {permission} · {mode}"
             )
             item.setData(Qt.ItemDataRole.UserRole, str(tool.get("name")))
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
@@ -4052,11 +4185,28 @@ class SettingsPage(QWidget):
 
         chat = self._add_settings_page("聊天偏好", "当前聊天行为由客户端统一定义。")
         chat_section, chat_content = self._settings_section("输入与显示")
-        chat_content.addWidget(self._read_only_setting("发送快捷键", "Ctrl+Enter；macOS 同时支持 Cmd+Enter", "当前固定"))
-        self.enter_to_send = QCheckBox("按 Enter 发送；Shift+Enter 换行")
-        self.enter_to_send.setChecked(QSettings().value("chat/enter_to_send", False, type=bool))
-        self.enter_to_send.toggled.connect(lambda enabled: QSettings().setValue("chat/enter_to_send", enabled))
-        chat_content.addWidget(self.enter_to_send)
+        send_row = QFrame()
+        send_row.setObjectName("SettingsRow")
+        send_layout = QHBoxLayout(send_row)
+        send_layout.setContentsMargins(0, 8, 0, 8)
+        send_text = QVBoxLayout()
+        send_heading = QLabel("发送快捷键")
+        send_heading.setObjectName("MemberName")
+        self.send_shortcut_hint = QLabel()
+        self.send_shortcut_hint.setObjectName("Muted")
+        send_text.addWidget(send_heading)
+        send_text.addWidget(self.send_shortcut_hint)
+        self.send_shortcut = QComboBox()
+        self.send_shortcut.setAccessibleName("发送快捷键")
+        self.send_shortcut.addItem("Enter 发送", True)
+        self.send_shortcut.addItem("Ctrl/Cmd+Enter 发送", False)
+        enter_to_send = QSettings().value("chat/enter_to_send", True, type=bool)
+        self.send_shortcut.setCurrentIndex(self.send_shortcut.findData(enter_to_send))
+        self.send_shortcut_hint.setText("Shift+Enter 换行" if enter_to_send else "Enter 换行")
+        self.send_shortcut.currentIndexChanged.connect(self._change_send_shortcut)
+        send_layout.addLayout(send_text, 1)
+        send_layout.addWidget(self.send_shortcut)
+        chat_content.addWidget(send_row)
         density_row = QFrame()
         density_row.setObjectName("SettingsRow")
         density_layout = QHBoxLayout(density_row)
@@ -4234,25 +4384,12 @@ class SettingsPage(QWidget):
             layout.addWidget(helper)
         return section, layout
 
-    @staticmethod
-    def _read_only_setting(title: str, description: str, value: str) -> QFrame:
-        row = QFrame()
-        row.setObjectName("SettingsRow")
-        layout = QHBoxLayout(row)
-        layout.setContentsMargins(0, 8, 0, 8)
-        text = QVBoxLayout()
-        heading = QLabel(title)
-        heading.setObjectName("MemberName")
-        helper = QLabel(description)
-        helper.setObjectName("Muted")
-        helper.setWordWrap(True)
-        text.addWidget(heading)
-        text.addWidget(helper)
-        badge = QLabel(value)
-        badge.setObjectName("RoleBadge")
-        layout.addLayout(text, 1)
-        layout.addWidget(badge)
-        return row
+    def _change_send_shortcut(self, _index: int) -> None:
+        enter_to_send = bool(self.send_shortcut.currentData())
+        QSettings().setValue("chat/enter_to_send", enter_to_send)
+        self.send_shortcut_hint.setText(
+            "Shift+Enter 换行" if enter_to_send else "Enter 换行"
+        )
 
     def _select_section(self, index: int) -> None:
         if index < 0 or index >= self.settings_stack.count():
@@ -4322,7 +4459,7 @@ class SettingsPage(QWidget):
             "preferences": {
                 "theme": manager.mode.value if manager is not None else "system",
                 "message_density": str(settings.value(MESSAGE_DENSITY_KEY, "default")),
-                "enter_to_send": bool(settings.value("chat/enter_to_send", False, type=bool)),
+                "enter_to_send": bool(settings.value("chat/enter_to_send", True, type=bool)),
                 "notifications_enabled": bool(
                     settings.value("notifications/enabled", False, type=bool)
                 ),
@@ -4529,6 +4666,7 @@ class Workspace(QWidget):
         self.service = service
         self.store = store
         self._compact_list_open = False
+        self._pending_todo_id: int | None = None
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(8)
@@ -4546,10 +4684,11 @@ class Workspace(QWidget):
             ("contacts", "通讯"),
             ("ai", "AI"),
             ("admin", "管理"),
+            ("todos", "待办"),
             ("settings", "设置"),
         )
         for index, (icon_key, label) in enumerate(navigation):
-            if index == 4:
+            if icon_key == "settings":
                 rail_layout.addStretch(1)
             button = NavigationButton(label, NAVIGATION_ICONS[icon_key], self.rail)
             button.clicked.connect(lambda _checked=False, page=index: self._navigate(page))
@@ -4566,15 +4705,16 @@ class Workspace(QWidget):
         self.chat_layout = QHBoxLayout(self.chat_root)
         self.chat_layout.setContentsMargins(0, 0, 0, 0)
         self.chat_layout.setSpacing(10)
-        self.conversations = ConversationPane()
+        self.conversations = ConversationPane(service, store)
         self.chat = ChatPane(service, store)
         self.chat_layout.addWidget(self.conversations)
         self.chat_layout.addWidget(self.chat, 1)
         self.contacts = ContactsPage(service)
         self.ai = AICenterPage(service, store)
         self.admin = AdminPage()
+        self.todos = PersonalTodoPage(service)
         self.settings = SettingsPage(service, store, host, port)
-        for page in (self.chat_root, self.contacts, self.ai, self.admin, self.settings):
+        for page in (self.chat_root, self.contacts, self.ai, self.admin, self.todos, self.settings):
             self.pages.addWidget(page)
         root.addWidget(self.rail)
         root.addWidget(self.pages, 1)
@@ -4583,6 +4723,7 @@ class Workspace(QWidget):
         self.chat.drafts_loaded.connect(self.conversations.set_drafts)
         self.chat.publish_drafts()
         self.chat.conversation_list_requested.connect(self._show_compact_conversations)
+        self.chat.todo_open_requested.connect(self._open_todo)
         self.contacts.conversation_requested.connect(self._open_from_contacts)
         self.ai.result_requested.connect(self._open_ai_result)
         self.settings.logout_requested.connect(self.logout_requested)
@@ -4597,6 +4738,9 @@ class Workspace(QWidget):
             self._apply_chat_layout()
         elif index == 1:
             self.contacts.update_state("contacts", self.store.state)
+        elif index == 4 and self.store.state.authenticated and not self.store.state.todos_loaded:
+            if not any(action == "todo.list" for action in self.store.state.pending.values()):
+                self.service.list_todos()
 
     def _refresh_navigation_icons(self, *_args: object) -> None:
         for button in self.nav_buttons:
@@ -4651,14 +4795,30 @@ class Workspace(QWidget):
         self.chat.focus_message(message_id)
         self.service.load_result(key, message_id)
 
+    def _open_todo(self, todo_id: int) -> None:
+        self._pending_todo_id = int(todo_id)
+        self.todos.update_state("todos", self.store.state)
+        self._navigate(4)
+        if self.todos.select_todo(todo_id) or self.store.state.todos_loaded:
+            self._pending_todo_id = None
+
     def update_state(self, topic: str, state: AppState) -> None:
         self.nav_buttons[3].setVisible(state.current_user.get("role") == "admin")
         self.nav_buttons[0].set_badge(sum(max(0, item.unread_count) for item in state.conversations))
-        if topic in {"auth", "conversations"}:
+        if topic in {"auth", "conversations", "profile", "avatar", "users"}:
             self.conversations.set_conversations(state.conversations)
             self.conversations.set_selected(state.current_conversation)
         for page in (self.chat, self.contacts, self.ai, self.admin, self.settings):
             page.update_state(topic, state)
+        self.todos.update_state(topic, state)
+        if topic == "todos" and self._pending_todo_id is not None:
+            if self.todos.select_todo(self._pending_todo_id):
+                self._pending_todo_id = None
+        if topic == "todo_target" and state.todo_target:
+            target = state.todo_target
+            key = ConversationKey(str(target["conversation_type"]), str(target["conversation_id"]))
+            self._open_ai_result(key, int(target["message_id"]))
+            state.todo_target = None
 
     def resizeEvent(self, event: Any) -> None:
         super().resizeEvent(event)
@@ -4833,6 +4993,9 @@ class MainWindow(QMainWindow):
                 self.service.sync_events()
         elif topic == "events" and state.events_has_more:
             self.service.sync_events()
+        elif topic == "todos" and state.todo_needs_refresh and state.authenticated:
+            state.todo_needs_refresh = False
+            self.service.list_todos()
         elif topic == "connection" and state.connected and self.was_authenticated and self.credentials and not state.authenticated:
             self.service.login(*self.credentials)
         elif topic == "connection" and not state.connected:

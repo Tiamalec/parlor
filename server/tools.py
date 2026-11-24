@@ -12,6 +12,8 @@ class ToolDefinition:
     label: str
     description: str
     requires_confirmation: bool = False
+    permission: str = "read"
+    parameters: dict[str, Any] | None = None
 
     def public_dict(self) -> dict[str, Any]:
         return {
@@ -19,6 +21,8 @@ class ToolDefinition:
             "label": self.label,
             "description": self.description,
             "mode": "confirm" if self.requires_confirmation else "auto",
+            "permission": self.permission,
+            "parameters": dict(self.parameters or {}),
         }
 
 
@@ -59,6 +63,124 @@ TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
         "压缩历史上下文",
         "把较早的会话内容压缩为可复用的摘要，避免上下文无限增长。",
     ),
+    "list_todos": ToolDefinition(
+        "list_todos",
+        "查询个人待办",
+        "查询当前请求用户自己的待办。不得查询或推断其他用户的待办；返回结果属于私有数据，只有在当前用户明确要求时才可在回复中概括。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "enum": ["all", "open", "completed"]},
+                "date_filter": {
+                    "type": "string",
+                    "enum": ["all", "today", "upcoming", "overdue", "undated"],
+                },
+                "priority": {"type": "string", "enum": ["all", "low", "normal", "high"]},
+                "query": {"type": "string", "maxLength": 200},
+                "sort": {"type": "string", "enum": ["due", "priority"]},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+            },
+            "additionalProperties": False,
+        },
+    ),
+    "get_todo": ToolDefinition(
+        "get_todo",
+        "查看个人待办详情",
+        "读取当前请求用户自己的一条待办详情。",
+        parameters={
+            "type": "object",
+            "properties": {"todo_id": {"type": "integer", "minimum": 1}},
+            "required": ["todo_id"],
+            "additionalProperties": False,
+        },
+    ),
+    "create_todo": ToolDefinition(
+        "create_todo",
+        "创建个人待办",
+        "为当前请求用户创建待办。所有者由服务端绑定，模型不得指定其他用户。",
+        permission="write",
+        parameters={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "minLength": 1, "maxLength": 200},
+                "description": {"type": "string", "maxLength": 4000},
+                "due_at": {"type": ["number", "null"]},
+                "priority": {"type": "string", "enum": ["low", "normal", "high"]},
+                "source_message_id": {"type": ["integer", "null"]},
+            },
+            "required": ["title"],
+            "additionalProperties": False,
+        },
+    ),
+    "update_todo": ToolDefinition(
+        "update_todo",
+        "更新个人待办",
+        "更新当前请求用户自己的一条待办。应先查询并用 expected_title 校验目标任务。",
+        permission="write",
+        parameters={
+            "type": "object",
+            "properties": {
+                "todo_id": {"type": "integer", "minimum": 1},
+                "expected_title": {"type": "string", "minLength": 1, "maxLength": 200},
+                "expected_version": {"type": "integer", "minimum": 1},
+                "title": {"type": "string", "minLength": 1, "maxLength": 200},
+                "description": {"type": "string", "maxLength": 4000},
+                "due_at": {"type": ["number", "null"]},
+                "priority": {"type": "string", "enum": ["low", "normal", "high"]},
+            },
+            "required": ["todo_id", "expected_title", "expected_version"],
+            "additionalProperties": False,
+        },
+    ),
+    "complete_todo": ToolDefinition(
+        "complete_todo",
+        "完成个人待办",
+        "把当前用户的一条待办标记为完成。",
+        permission="write",
+        parameters={
+            "type": "object",
+            "properties": {
+                "todo_id": {"type": "integer", "minimum": 1},
+                "expected_title": {"type": "string", "minLength": 1, "maxLength": 200},
+                "expected_version": {"type": "integer", "minimum": 1},
+            },
+            "required": ["todo_id", "expected_title", "expected_version"],
+            "additionalProperties": False,
+        },
+    ),
+    "reopen_todo": ToolDefinition(
+        "reopen_todo",
+        "恢复个人待办",
+        "把当前用户的一条已完成待办恢复为未完成。",
+        permission="write",
+        parameters={
+            "type": "object",
+            "properties": {
+                "todo_id": {"type": "integer", "minimum": 1},
+                "expected_title": {"type": "string", "minLength": 1, "maxLength": 200},
+                "expected_version": {"type": "integer", "minimum": 1},
+            },
+            "required": ["todo_id", "expected_title", "expected_version"],
+            "additionalProperties": False,
+        },
+    ),
+    "delete_todo": ToolDefinition(
+        "delete_todo",
+        "删除个人待办",
+        "删除当前用户的一条待办。必须由当前用户明确确认后执行。",
+        requires_confirmation=True,
+        permission="write",
+        parameters={
+            "type": "object",
+            "properties": {
+                "todo_id": {"type": "integer", "minimum": 1},
+                "expected_title": {"type": "string", "minLength": 1, "maxLength": 200},
+                "expected_version": {"type": "integer", "minimum": 1},
+            },
+            "required": ["todo_id", "expected_title", "expected_version"],
+            "additionalProperties": False,
+        },
+    ),
 }
 
 DEFAULT_AGENT_TOOL_NAMES = tuple(TOOL_DEFINITIONS)
@@ -73,6 +195,25 @@ def require_tool(name: str) -> ToolDefinition:
 
 def tool_catalog() -> list[dict[str, Any]]:
     return [definition.public_dict() for definition in TOOL_DEFINITIONS.values()]
+
+
+def model_tool_specs(names: Any) -> list[dict[str, Any]]:
+    """Return native function-calling schemas for an authorized tool subset."""
+
+    checked = validate_tool_names(names)
+    result: list[dict[str, Any]] = []
+    for name in checked:
+        definition = TOOL_DEFINITIONS[name]
+        if definition.parameters is None:
+            continue
+        result.append(
+            {
+                "name": name,
+                "description": definition.description,
+                "parameters": dict(definition.parameters),
+            }
+        )
+    return result
 
 
 def validate_tool_names(names: Any) -> list[str]:

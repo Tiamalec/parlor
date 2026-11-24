@@ -15,6 +15,7 @@ from .theme import ThemeVariant, active_theme_manager, current_tokens
 NAVIGATION_ICONS = {
     "messages": "message-circle",
     "contacts": "users",
+    "todos": "list-todo",
     "ai": "bot",
     "admin": "shield",
     "settings": "settings-2",

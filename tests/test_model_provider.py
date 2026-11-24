@@ -6,10 +6,13 @@ import unittest
 from unittest.mock import patch
 
 from server.model_provider import (
+    AgentUnavailable,
     GeminiAdapter,
     OllamaAdapter,
     OpenAICompatibleProvider,
+    ProviderToolCall,
     ProviderSettings,
+    ProviderTurn,
     probe_settings,
 )
 
@@ -202,6 +205,320 @@ class ModelProviderTests(unittest.TestCase):
                 "model",
                 extra_parameters={"messages": []},
             ).validated()
+
+    def test_openai_tool_turn_maps_native_payload_and_calls(self) -> None:
+        provider = OpenAICompatibleProvider(
+            ProviderSettings(
+                "openai_chat",
+                "https://models.example/v1",
+                "demo-model",
+                max_output_tokens=321,
+                reasoning_effort="low",
+            ).validated(),
+            "secret",
+        )
+        captured: dict[str, object] = {}
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "description": "Read current weather",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                        "required": ["city"],
+                    },
+                },
+            }
+        ]
+
+        def fake_urlopen(request: object, timeout: int) -> _Response:
+            captured["url"] = request.full_url  # type: ignore[attr-defined]
+            captured["payload"] = json.loads(request.data.decode("utf-8"))  # type: ignore[attr-defined]
+            return _Response(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "Checking.",
+                                "tool_calls": [
+                                    {
+                                        "id": "call_openai",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "get_weather",
+                                            "arguments": '{"city":"Paris"}',
+                                        },
+                                    }
+                                ],
+                            },
+                            "finish_reason": "tool_calls",
+                        }
+                    ]
+                }
+            )
+
+        with patch("server.model_provider.URL_OPENER.open", fake_urlopen):
+            turn = asyncio.run(
+                provider.generate_tool_turn(
+                    "system", [{"role": "user", "content": "Weather?"}], tools
+                )
+            )
+
+        self.assertEqual(turn, ProviderTurn("Checking.", [ProviderToolCall("call_openai", "get_weather", {"city": "Paris"})]))
+        self.assertTrue(str(captured["url"]).endswith("/chat/completions"))
+        payload = captured["payload"]
+        self.assertEqual(payload["messages"], [  # type: ignore[index]
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "Weather?"},
+        ])
+        self.assertEqual(payload["tools"][0]["function"]["name"], "get_weather")  # type: ignore[index]
+        self.assertEqual(payload["max_tokens"], 321)  # type: ignore[index]
+        self.assertEqual(payload["reasoning_effort"], "low")  # type: ignore[index]
+
+    def test_ollama_tool_turn_maps_tools_and_stable_generated_ids(self) -> None:
+        provider = OllamaAdapter(
+            ProviderSettings(
+                "ollama_native",
+                "http://localhost:11434",
+                "qwen",
+                auth_type="none",
+                max_output_tokens=222,
+            ).validated(),
+            "",
+        )
+        payloads: list[dict[str, object]] = []
+        response = {
+            "message": {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "get_weather",
+                            "arguments": {"city": "Rome"},
+                        }
+                    }
+                ],
+            }
+        }
+
+        def fake_urlopen(request: object, timeout: int) -> _Response:
+            payloads.append(json.loads(request.data.decode("utf-8")))  # type: ignore[attr-defined]
+            return _Response(response)
+
+        tools = [
+            {
+                "name": "get_weather",
+                "description": "Read current weather",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                },
+            }
+        ]
+        with patch("server.model_provider.URL_OPENER.open", fake_urlopen):
+            first = asyncio.run(
+                provider.generate_tool_turn(
+                    "system", [{"role": "user", "content": "Weather?"}], tools
+                )
+            )
+            second = asyncio.run(
+                provider.generate_tool_turn(
+                    "system", [{"role": "user", "content": "Weather?"}], tools
+                )
+            )
+
+        self.assertEqual(first.tool_calls[0].name, "get_weather")
+        self.assertEqual(first.tool_calls[0].arguments, {"city": "Rome"})
+        self.assertEqual(first.tool_calls[0].id, second.tool_calls[0].id)
+        self.assertTrue(first.tool_calls[0].id.startswith("call_"))
+        self.assertEqual(payloads[0]["tools"][0]["type"], "function")  # type: ignore[index]
+        self.assertEqual(payloads[0]["options"]["num_predict"], 222)  # type: ignore[index]
+
+    def test_gemini_tool_turn_maps_function_declarations_and_calls(self) -> None:
+        provider = GeminiAdapter(
+            ProviderSettings(
+                "gemini_native",
+                "https://generativelanguage.googleapis.com/v1beta",
+                "gemini-flash",
+                auth_type="x-goog-api-key",
+                max_output_tokens=199,
+            ).validated(),
+            "google-secret",
+        )
+        captured: dict[str, object] = {}
+
+        def fake_urlopen(request: object, timeout: int) -> _Response:
+            captured["url"] = request.full_url  # type: ignore[attr-defined]
+            captured["payload"] = json.loads(request.data.decode("utf-8"))  # type: ignore[attr-defined]
+            return _Response(
+                {
+                    "candidates": [
+                        {
+                            "content": {
+                                "role": "model",
+                                "parts": [
+                                    {"text": "I can check."},
+                                    {
+                                        "functionCall": {
+                                            "name": "get_weather",
+                                            "args": {"city": "Oslo"},
+                                        }
+                                    },
+                                ],
+                            }
+                        }
+                    ]
+                }
+            )
+
+        tools = [
+            {
+                "name": "get_weather",
+                "description": "Read current weather",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                },
+            }
+        ]
+        with patch("server.model_provider.URL_OPENER.open", fake_urlopen):
+            turn = asyncio.run(
+                provider.generate_tool_turn(
+                    "system", [{"role": "user", "content": "Weather?"}], tools
+                )
+            )
+
+        self.assertEqual(turn.content, "I can check.")
+        self.assertEqual(turn.tool_calls[0].name, "get_weather")
+        self.assertEqual(turn.tool_calls[0].arguments, {"city": "Oslo"})
+        self.assertTrue(turn.tool_calls[0].id.startswith("call_"))
+        payload = captured["payload"]
+        self.assertEqual(payload["tools"][0]["functionDeclarations"][0]["name"], "get_weather")  # type: ignore[index]
+        self.assertEqual(payload["generationConfig"]["maxOutputTokens"], 199)  # type: ignore[index]
+        self.assertTrue(str(captured["url"]).endswith("/models/gemini-flash:generateContent"))
+
+    def test_multi_turn_tool_result_requests_use_each_native_format(self) -> None:
+        messages = [
+            {"role": "user", "content": "Weather?"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_weather",
+                        "name": "get_weather",
+                        "arguments": {"city": "Paris"},
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_weather",
+                "name": "get_weather",
+                "content": '{"temperature":22}',
+            },
+        ]
+        tools = [{"name": "get_weather", "parameters": {"type": "object"}}]
+        captured: dict[str, dict[str, object]] = {}
+
+        openai = OpenAICompatibleProvider(
+            ProviderSettings("openai_chat", "https://models.example/v1", "openai").validated(),
+            "secret",
+        )
+        ollama = OllamaAdapter(
+            ProviderSettings("ollama_native", "http://localhost:11434", "qwen", auth_type="none").validated(),
+            "",
+        )
+        gemini = GeminiAdapter(
+            ProviderSettings(
+                "gemini_native",
+                "https://generativelanguage.googleapis.com/v1beta",
+                "gemini",
+                auth_type="none",
+            ).validated(),
+            "",
+        )
+
+        def openai_response(request: object, timeout: int) -> _Response:
+            captured["openai"] = json.loads(request.data.decode("utf-8"))  # type: ignore[attr-defined]
+            return _Response({"choices": [{"message": {"content": "Sunny"}}]})
+
+        def ollama_response(request: object, timeout: int) -> _Response:
+            captured["ollama"] = json.loads(request.data.decode("utf-8"))  # type: ignore[attr-defined]
+            return _Response({"message": {"content": "Sunny"}})
+
+        def gemini_response(request: object, timeout: int) -> _Response:
+            captured["gemini"] = json.loads(request.data.decode("utf-8"))  # type: ignore[attr-defined]
+            return _Response({"candidates": [{"content": {"parts": [{"text": "Sunny"}]}}]})
+
+        with patch("server.model_provider.URL_OPENER.open", openai_response):
+            self.assertEqual(
+                asyncio.run(openai.generate_tool_turn("system", messages, tools)).content,
+                "Sunny",
+            )
+        with patch("server.model_provider.URL_OPENER.open", ollama_response):
+            self.assertEqual(
+                asyncio.run(ollama.generate_tool_turn("system", messages, tools)).content,
+                "Sunny",
+            )
+        with patch("server.model_provider.URL_OPENER.open", gemini_response):
+            self.assertEqual(
+                asyncio.run(gemini.generate_tool_turn("system", messages, tools)).content,
+                "Sunny",
+            )
+
+        openai_messages = captured["openai"]["messages"]  # type: ignore[index]
+        self.assertIsNone(openai_messages[2]["content"])
+        self.assertEqual(openai_messages[2]["tool_calls"][0]["function"]["arguments"], '{"city":"Paris"}')
+        self.assertEqual(openai_messages[3]["tool_call_id"], "call_weather")
+        ollama_messages = captured["ollama"]["messages"]  # type: ignore[index]
+        self.assertEqual(ollama_messages[2]["tool_calls"][0]["function"]["arguments"], {"city": "Paris"})
+        self.assertEqual(ollama_messages[3]["tool_name"], "get_weather")
+        gemini_contents = captured["gemini"]["contents"]  # type: ignore[index]
+        self.assertEqual(gemini_contents[1]["role"], "model")
+        self.assertEqual(gemini_contents[1]["parts"][0]["functionCall"]["name"], "get_weather")
+        self.assertEqual(gemini_contents[2]["parts"][0]["functionResponse"]["response"], {"temperature": 22})
+
+    def test_tool_turn_rejects_malformed_native_arguments(self) -> None:
+        provider = OpenAICompatibleProvider(
+            ProviderSettings("openai_chat", "https://models.example/v1", "model").validated(),
+            "secret",
+        )
+
+        def fake_urlopen(request: object, timeout: int) -> _Response:
+            return _Response(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "tool_calls": [
+                                    {
+                                        "id": "call_bad",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "get_weather",
+                                            "arguments": "{not-json}",
+                                        },
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            )
+
+        with patch("server.model_provider.URL_OPENER.open", fake_urlopen):
+            with self.assertRaises(AgentUnavailable) as raised:
+                asyncio.run(
+                    provider.generate_tool_turn(
+                        "system",
+                        [{"role": "user", "content": "Weather?"}],
+                        [{"name": "get_weather"}],
+                    )
+                )
+        self.assertEqual(raised.exception.category, "invalid_response")
 
 
 if __name__ == "__main__":

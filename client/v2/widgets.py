@@ -45,7 +45,7 @@ from client.models import ConversationSummary
 from client.profile import ProfileViewModel
 
 from .agent_cards import SummaryCard, TodoCard
-from .icons import lucide_icon_with_color
+from .icons import brand_logo_icon, lucide_icon_with_color
 from .theme import ThemeSnapshot, active_theme_manager, current_tokens
 
 if TYPE_CHECKING:
@@ -455,23 +455,31 @@ class MentionTextEdit(QTextEdit):
             key_map = {
                 Qt.Key.Key_Up: -1,
                 Qt.Key.Key_Down: 1,
-                Qt.Key.Key_Return: 0,
-                Qt.Key.Key_Enter: 0,
                 Qt.Key.Key_Escape: 2,
             }
+            if event.modifiers() == Qt.KeyboardModifier.NoModifier:
+                key_map[Qt.Key.Key_Return] = 0
+                key_map[Qt.Key.Key_Enter] = 0
             if event.key() in key_map:
                 self.mention_key.emit(key_map[event.key()])
                 event.accept()
                 return
         if (
             event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}
-            and event.modifiers() == Qt.KeyboardModifier.NoModifier
             and not self._composing
-            and QSettings().value("chat/enter_to_send", False, type=bool)
         ):
-            self.send_requested.emit()
-            event.accept()
-            return
+            enter_to_send = QSettings().value("chat/enter_to_send", True, type=bool)
+            modifiers = event.modifiers()
+            if (
+                (enter_to_send and modifiers == Qt.KeyboardModifier.NoModifier)
+                or (not enter_to_send and modifiers in {
+                    Qt.KeyboardModifier.ControlModifier,
+                    Qt.KeyboardModifier.MetaModifier,
+                })
+            ):
+                self.send_requested.emit()
+                event.accept()
+                return
         cursor = self.textCursor()
         if event.key() in {Qt.Key.Key_Backspace, Qt.Key.Key_Delete}:
             if cursor.hasSelection():
@@ -497,12 +505,16 @@ class MentionTextEdit(QTextEdit):
             return
         cursor = self.textCursor()
         before = self.toPlainText()[: self._utf16_to_py_index(self.toPlainText(), cursor.position())]
-        match = re.search(r"(?:^|\s)@([^\s@]{0,30})$", before)
+        match = re.search(r"@([^\s@]{0,30})$", before)
         if not match:
             self._trigger_start = None
             self.mention_closed.emit()
             return
         self._trigger_start = cursor.position() - len(match.group(1).encode("utf-16-le")) // 2 - 1
+        if self._mention_range_at(self._trigger_start):
+            self._trigger_start = None
+            self.mention_closed.emit()
+            return
         self.mention_query.emit(match.group(1))
 
     def insert_mention(self, member: dict[str, Any]) -> None:
@@ -758,6 +770,15 @@ class ConversationCard(QFrame):
             self._badge.hide()
         self._refresh_preview()
 
+    def set_avatar(
+        self,
+        name: str,
+        image_data: str | None = None,
+        *,
+        group: bool | None = None,
+    ) -> None:
+        self._avatar.set_avatar(name, image_data, group=group)
+
     def _refresh_title(self) -> None:
         available = max(0, self.width() - 20 - 36 - 10 - 42 - 6 - 2)
         title = self.summary.title
@@ -840,6 +861,8 @@ class MessageBubble(QFrame):
     quote_requested = Signal(int)
     media_requested = Signal(int)
     sources_requested = Signal(list)
+    todo_import_requested = Signal(int, list)
+    todo_open_requested = Signal(int)
 
     def __init__(
         self,
@@ -931,6 +954,9 @@ class MessageBubble(QFrame):
             return self._build_text_content()
         widget = SummaryCard(card) if self.card_kind == "summary" else TodoCard(card)
         widget.sources_requested.connect(self.sources_requested.emit)
+        if isinstance(widget, TodoCard):
+            widget.import_requested.connect(self.todo_import_requested.emit)
+            widget.todo_requested.connect(self.todo_open_requested.emit)
         self.agent_card = widget
         return widget
 
@@ -1131,14 +1157,56 @@ class MessageBubble(QFrame):
         return menu
 
 
+class BrandLockup(QWidget):
+    """Horizontal brand mark and wordmark used by the empty chat canvas."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.icon_label = QLabel()
+        self.icon_label.setFixedSize(80, 80)
+        self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.icon_label.setAccessibleName("Parlor")
+        self.wordmark = QLabel("Parlor")
+        self.wordmark.setObjectName("EmptyStateWordmark")
+        self.wordmark.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        layout.addWidget(self.icon_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(self.wordmark, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._refresh_icon()
+        manager = active_theme_manager()
+        if manager:
+            manager.themeChanged.connect(self._refresh_icon)
+
+    def _refresh_icon(self, _snapshot: ThemeSnapshot | None = None) -> None:
+        self.icon_label.setPixmap(brand_logo_icon(72).pixmap(72, 72))
+
+
 class EmptyState(QWidget):
-    def __init__(self, title: str, description: str, icon_text: str = "💬") -> None:
+    def __init__(
+        self,
+        title: str,
+        description: str,
+        icon_text: str = "💬",
+        *,
+        mark: QWidget | None = None,
+        body_width: int | None = None,
+    ) -> None:
         super().__init__()
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(10)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon = QLabel(icon_text)
-        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon.setObjectName("EmptyStateIcon")
+        if mark is not None:
+            icon = mark
+        else:
+            icon = QLabel(icon_text)
+            icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            icon.setObjectName("EmptyStateIcon")
         heading = QLabel(title)
         heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
         heading.setObjectName("EmptyStateTitle")
@@ -1146,6 +1214,9 @@ class EmptyState(QWidget):
         body.setObjectName("Muted")
         body.setAlignment(Qt.AlignmentFlag.AlignCenter)
         body.setWordWrap(True)
+        if body_width:
+            body.setMinimumWidth(body_width)
+            body.setMaximumWidth(body_width)
         layout.addWidget(icon)
         layout.addWidget(heading)
         layout.addWidget(body)

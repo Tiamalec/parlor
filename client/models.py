@@ -16,6 +16,21 @@ class ConversationKey:
         """Stable local identifier shared by drafts and view caches."""
         return f"{self.kind}:{self.identifier}"
 
+    def peer_user_id(self, current_user_id: int | str | None) -> int | None:
+        """Resolve the other participant of a private conversation."""
+
+        if self.kind != "private":
+            return None
+        parts = self.identifier.split(":")
+        try:
+            if len(parts) == 3 and parts[0] == "dm" and current_user_id is not None:
+                own_id = int(current_user_id)
+                first, second = int(parts[1]), int(parts[2])
+                return second if first == own_id else first
+            return int(self.identifier)
+        except (TypeError, ValueError):
+            return None
+
     @classmethod
     def from_payload(
         cls, payload: dict[str, Any], current_user_id: int | str | None = None
@@ -66,6 +81,13 @@ class AppState:
     capabilities: dict[str, bool] = field(default_factory=dict)
     current_conversation: ConversationKey | None = None
     conversations: list[ConversationSummary] = field(default_factory=list)
+    todos: list[dict[str, Any]] = field(default_factory=list)
+    todo_revision: int = 0
+    todos_loaded: bool = False
+    todo_error: str = ""
+    todo_needs_refresh: bool = False
+    todo_target: dict[str, Any] | None = None
+    todo_import_results: dict[int, dict[str, Any]] = field(default_factory=dict)
     messages: dict[ConversationKey, list[dict[str, Any]]] = field(default_factory=dict)
     history_loaded_at: dict[ConversationKey, float] = field(default_factory=dict)
     search_results: dict[ConversationKey, list[dict[str, Any]]] = field(default_factory=dict)

@@ -60,6 +60,7 @@ class ChatService:
             ("agent.status", {}),
             ("agent.list", {}),
             ("agent.activity.list", {"limit": 100}),
+            ("todo.list", {}),
             ("tool.calls.list", {"limit": 100}),
             ("tool.list", {}),
         ):
@@ -203,6 +204,47 @@ class ChatService:
         payload = self.scope(key)
         payload.update({"before_id": message_id + 1, "limit": 20, "media_mode": "metadata"})
         return self.request("history.sync", payload)
+
+    def list_todos(self) -> str | None:
+        return self.request("todo.list")
+
+    def create_todo(self, title: str, description: str = "", due_at: float | None = None,
+                    priority: str = "normal") -> str | None:
+        return self.request("todo.create", {"title": title, "description": description,
+                                            "due_at": due_at, "priority": priority})
+
+    def update_todo(
+        self, todo_id: int, *, expected_version: int | None = None, **changes: Any
+    ) -> str | None:
+        payload = {"todo_id": todo_id, **changes}
+        if expected_version is not None:
+            payload["expected_version"] = expected_version
+        return self.request("todo.update", payload)
+
+    def complete_todo(
+        self,
+        todo_id: int,
+        completed: bool,
+        expected_version: int | None = None,
+    ) -> str | None:
+        payload = {"todo_id": todo_id, "completed": completed}
+        if expected_version is not None:
+            payload["expected_version"] = expected_version
+        return self.request("todo.complete", payload)
+
+    def delete_todo(self, todo_id: int, expected_version: int | None = None) -> str | None:
+        payload = {"todo_id": todo_id}
+        if expected_version is not None:
+            payload["expected_version"] = expected_version
+        return self.request("todo.delete", payload)
+
+    def import_todo_tasks(self, message_id: int, task_indices: list[int]) -> str | None:
+        return self.request(
+            "todo.import", {"message_id": message_id, "task_indices": task_indices}
+        )
+
+    def resolve_todo_message(self, todo_id: int) -> str | None:
+        return self.request("todo.resolve", {"todo_id": todo_id})
 
     def send_image(self, key: ConversationKey, name: str, mime: str, encoded: str, size: int) -> str | None:
         payload = self.scope(key)

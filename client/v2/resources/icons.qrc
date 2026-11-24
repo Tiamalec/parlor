@@ -6,6 +6,16 @@
     <file alias="shield.svg">lucide/shield.svg</file>
     <file alias="settings-2.svg">lucide/settings-2.svg</file>
     <file alias="arrow-down.svg">lucide/arrow-down.svg</file>
+    <file alias="arrow-right.svg">lucide/arrow-right.svg</file>
+    <file alias="calendar-days.svg">lucide/calendar-days.svg</file>
+    <file alias="flag.svg">lucide/flag.svg</file>
+    <file alias="plus.svg">lucide/plus.svg</file>
+    <file alias="x.svg">lucide/x.svg</file>
+    <file alias="external-link.svg">lucide/external-link.svg</file>
+    <file alias="chevron-left.svg">lucide/chevron-left.svg</file>
+    <file alias="chevron-right.svg">lucide/chevron-right.svg</file>
+    <file alias="chevron-down.svg">lucide/chevron-down.svg</file>
+    <file alias="more-horizontal.svg">lucide/more-horizontal.svg</file>
     <file alias="file-text.svg">lucide/file-text.svg</file>
     <file alias="list-todo.svg">lucide/list-todo.svg</file>
     <file alias="sparkles.svg">lucide/sparkles.svg</file>
