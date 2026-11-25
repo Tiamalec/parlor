@@ -32,6 +32,7 @@ from client.service import ChatService
 from .icons import lucide_icon, lucide_icon_with_color
 from .theme import active_theme_manager, current_tokens
 from .widgets import configure_scroll_surface, configure_surface
+from .components import PageHeader
 
 
 PRIORITY_LABELS = {"low": "低优先级", "normal": "普通", "high": "高优先级"}
@@ -194,25 +195,24 @@ class PersonalTodoPage(QWidget):
 
         configure_surface(self, "canvas")
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(18, 18, 18, 18)
+        outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
         self.shell = QFrame()
         self.shell.setObjectName("TodoWorkspace")
         self.page_layout = QVBoxLayout(self.shell)
-        self.page_layout.setContentsMargins(26, 24, 26, 22)
-        self.page_layout.setSpacing(16)
+        self.page_layout.setContentsMargins(26, 22, 26, 22)
+        self.page_layout.setSpacing(14)
         outer.addWidget(self.shell, 1)
 
-        header = QHBoxLayout()
-        header.setSpacing(14)
-        title = QLabel("我的待办")
-        title.setObjectName("TodoPageTitle")
-        header.addWidget(title)
         self.summary = QLabel()
         self.summary.setObjectName("TodoSummary")
-        header.addWidget(self.summary)
-        header.addStretch(1)
-        self.page_layout.addLayout(header)
+        self.header = PageHeader(
+            "我的待办",
+            "把会话里的承诺落到今天，完成后仍然可以回看来源。",
+            eyebrow="任务",
+        )
+        self.header.add_action(self.summary)
+        self.page_layout.addWidget(self.header)
 
         self.quick_bar = QWidget()
         configure_surface(self.quick_bar, "surface")

@@ -31,6 +31,23 @@ class V2UiTests(unittest.TestCase):
         self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         self.app.processEvents()
 
+    def test_agent_source_links_open_only_http_urls(self) -> None:
+        from client.v2.widgets import MessageBubble, markdown_to_safe_html
+
+        bubble = MessageBubble(
+            {"message_type": "agent", "content_format": "markdown",
+             "content": "来源：[官方资料](https://example.org/docs)"},
+            mine=False,
+        )
+        self.assertIn('href="https://example.org/docs"', markdown_to_safe_html(bubble._raw_content))
+        with patch("client.v2.widgets.message.QDesktopServices.openUrl") as opener:
+            bubble.content_label.linkActivated.emit("https://example.org/docs")
+            bubble.content_label.linkActivated.emit("file:///etc/passwd")
+            bubble.content_label.linkActivated.emit("javascript:alert(1)")
+            bubble.content_label.linkActivated.emit("https://[invalid")
+        opener.assert_called_once()
+        self.assertEqual(opener.call_args.args[0].toString(), "https://example.org/docs")
+
     def test_chat_quote_marker_and_search_navigation(self) -> None:
         from client.network import NetworkClient
         from client.service import ChatService
@@ -417,7 +434,7 @@ class V2UiTests(unittest.TestCase):
             self.assertTrue(pane._sticker_panel.isVisible())
             pane._sticker_panel.close_button.click()
             with patch(
-                "client.v2.application.QFileDialog.getOpenFileName",
+                "client.v2.pages.chat_page.QFileDialog.getOpenFileName",
                 return_value=("", ""),
             ) as chooser:
                 QTest.mouseClick(pane.image, Qt.MouseButton.LeftButton)
@@ -971,7 +988,7 @@ class V2UiTests(unittest.TestCase):
         self.assertEqual(card._title.text(), "项目组")
         self.assertGreater(card._title.width(), 0)
         self.assertTrue(card._avatar._group)
-        self.assertEqual(card.height(), 64)
+        self.assertEqual(card.height(), 72)
         card.set_selected(True)
         self.assertTrue(card.property("selected"))
         card.close()
@@ -1053,13 +1070,13 @@ class V2UiTests(unittest.TestCase):
         workspace.show()
         self.app.processEvents()
 
-        self.assertEqual(workspace.rail.width(), 80)
+        self.assertEqual(workspace.rail.width(), 64)
         self.assertIsNone(workspace.rail.findChild(QLabel, "BrandMark"))
-        self.assertEqual([button.text() for button in workspace.nav_buttons], ["消息", "通讯", "AI", "管理", "待办", "设置"])
+        self.assertEqual([button.text() for button in workspace.nav_buttons], ["消息", "通讯", "AI 任务", "待办", "管理", "设置"])
         self.assertTrue(all(isinstance(button, QToolButton) for button in workspace.nav_buttons))
         for button in workspace.nav_buttons:
-            self.assertEqual(button.size(), QSize(64, 60))
-            self.assertEqual(button.iconSize(), QSize(21, 21))
+            self.assertEqual(button.size(), QSize(52, 56))
+            self.assertEqual(button.iconSize(), QSize(20, 20))
             self.assertFalse(button.icon().isNull())
             self.assertEqual(button.accessibleName(), button.text())
             self.assertTrue(button.toolTip())
@@ -1069,7 +1086,7 @@ class V2UiTests(unittest.TestCase):
         self.assertEqual(len({button.geometry().center().x() for button in workspace.nav_buttons}), 1)
         self.assertEqual(
             [upper_buttons[index + 1].y() - upper_buttons[index].y() for index in range(3)],
-            [64, 64, 64],
+            [60, 60, 60],
         )
         geometry_before_selection = [button.geometry() for button in workspace.nav_buttons]
 
@@ -1078,7 +1095,7 @@ class V2UiTests(unittest.TestCase):
         self.assertEqual(workspace.pages.currentIndex(), 1)
         self.assertTrue(workspace.nav_buttons[1].hasFocus())
 
-        for index in (2, 4, 0):
+        for index in (2, 3, 0):
             workspace.nav_buttons[index].click()
             self.assertEqual(workspace.pages.currentIndex(), index)
             self.assertTrue(workspace.nav_buttons[index].isChecked())
@@ -1092,14 +1109,20 @@ class V2UiTests(unittest.TestCase):
             ],
         )
         workspace.update_state("conversations", user_state)
-        self.assertFalse(workspace.nav_buttons[3].isVisible())
+        self.assertFalse(workspace.nav_buttons[4].isVisible())
         self.assertEqual(workspace.nav_buttons[0].badge.text(), "5")
         self.assertTrue(workspace.nav_buttons[0].badge.isVisible())
 
         admin_state = AppState(current_user={"id": 1, "role": "admin"})
         workspace.update_state("auth", admin_state)
-        self.assertTrue(workspace.nav_buttons[3].isVisible())
+        self.assertTrue(workspace.nav_buttons[4].isVisible())
         self.assertGreater(workspace.nav_buttons[5].y(), workspace.nav_buttons[4].y() + 60)
+
+        workspace.resize(1180, 760)
+        self.app.processEvents()
+        self.assertEqual(workspace.rail.width(), 236)
+        self.assertTrue(workspace.sidebar_wordmark.isVisible())
+        self.assertTrue(workspace.user_card.isVisible())
         workspace.close()
 
     def test_scroll_surfaces_override_dark_system_palette(self) -> None:
@@ -1145,7 +1168,8 @@ class V2UiTests(unittest.TestCase):
             self.assertEqual(chat.message_content.property("surfaceRole"), "surface")
             self.assertEqual(chat.details.scroll_content.property("surfaceRole"), "surface")
             self.assertEqual(tasks.property("surfaceRole"), "canvas")
-            self.assertEqual(tasks.task_content.property("surfaceRole"), "surface")
+            self.assertEqual(tasks.task_content.property("surfaceRole"), "canvas")
+            self.assertEqual(tasks.scroll.viewport().property("surfaceRole"), "canvas")
             for widget in (conversations, chat, tasks):
                 widget.close()
                 widget.deleteLater()
@@ -1741,7 +1765,7 @@ class V2UiTests(unittest.TestCase):
         page.update_state("conversations", store.state)
         card = page.task_rows.itemAt(0).widget()
         self.assertIsInstance(card, AgentTaskCard)
-        labels = [label.text() for label in card.findChildren(type(page.status))]
+        labels = [label.text() for label in card.findChildren(QLabel)]
         self.assertIn("总结会话", labels)
         self.assertTrue(any("项目组" in text for text in labels))
         self.assertEqual(page.filter_summary.text(), "2 个任务")
@@ -1904,7 +1928,7 @@ class V2UiTests(unittest.TestCase):
         editor = MentionTextEdit()
         sent: list[bool] = []
         editor.send_requested.connect(lambda: sent.append(True))
-        with patch("client.v2.widgets.QSettings") as settings:
+        with patch("client.v2.widgets.text_edit.QSettings") as settings:
             settings.return_value.value.side_effect = lambda _key, default, **_kwargs: default
             QTest.keyClick(editor, Qt.Key.Key_Return)
             self.assertEqual(sent, [True])
@@ -2042,6 +2066,70 @@ class V2UiTests(unittest.TestCase):
         self.assertIn("周五发布", listing.item(0).text())
         self.assertTrue(memories.enabled_check.isChecked())
         memories.close()
+
+    def test_group_owner_saves_group_tools_without_agent_global_permission(self) -> None:
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import AgentManagerDialog
+
+        store = AppStore()
+        store.state.current_user = {"id": 1, "role": "user"}
+        agent = {"id": "agent", "name": "AI Agent", "owner_id": None,
+                 "enabled": True, "can_manage": False}
+        store.state.agents = [agent]
+        store.state.groups = [{"id": 7, "name": "研究组", "owner_id": 1, "joined": 1}]
+        store.state.group_agents["7"] = [agent]
+        tools = [
+            {"name": "web_search", "label": "联网搜索", "enabled": False, "group_enabled": True},
+            {"name": "read_conversation_messages", "label": "读取会话", "enabled": True, "group_enabled": True},
+        ]
+        store.state.agent_tools["agent"] = [dict(tool) for tool in tools]
+        store.state.group_agent_tools[("7", "agent")] = [dict(tool) for tool in tools]
+        service = ChatService(NetworkClient("127.0.0.1", 9), store)
+        manager = AgentManagerDialog(service, store, group_id="7")
+        manager._load_agent(agent)
+        self.assertFalse(manager.save_tools.isEnabled())
+        self.assertTrue(manager.tool_list.isEnabled())
+        self.assertTrue(manager.tool_list.isHidden())
+        self.assertFalse(manager.tool_list.item(0).flags() & Qt.ItemFlag.ItemIsUserCheckable)
+        self.assertEqual(manager.save_tools.text(), "全局权限由管理员管理")
+        self.assertIn("群内工具权限", manager.global_tool_help.text())
+        self.assertTrue(manager.save_group_tools.isEnabled())
+        self.assertTrue(manager.group_tool_list.item(0).flags() & Qt.ItemFlag.ItemIsEnabled)
+        self.assertFalse(manager.group_tool_list.item(0).flags() & Qt.ItemFlag.ItemIsUserCheckable)
+        self.assertIn("Agent 未授权", manager.group_tool_list.item(0).text())
+        with patch.object(service, "set_group_agent_tools") as save:
+            manager._save_group_tools()
+        save.assert_called_once_with("7", "agent", ["read_conversation_messages"])
+        manager.close()
+
+    def test_group_owner_saves_authorized_web_search_for_group(self) -> None:
+        from client.network import NetworkClient
+        from client.service import ChatService
+        from client.store import AppStore
+        from client.v2.application import AgentManagerDialog
+
+        store = AppStore()
+        store.state.current_user = {"id": 1, "role": "user"}
+        agent = {"id": "agent", "name": "AI Agent", "owner_id": None,
+                 "enabled": True, "can_manage": False}
+        store.state.agents = [agent]
+        store.state.groups = [{"id": 7, "name": "研究组", "owner_id": 1, "joined": 1}]
+        store.state.group_agents["7"] = [agent]
+        tools = [{"name": "web_search", "label": "联网搜索", "enabled": True, "group_enabled": False}]
+        store.state.agent_tools["agent"] = [dict(tool) for tool in tools]
+        store.state.group_agent_tools[("7", "agent")] = [dict(tool) for tool in tools]
+        service = ChatService(NetworkClient("127.0.0.1", 9), store)
+        manager = AgentManagerDialog(service, store, group_id="7")
+        manager._load_agent(agent)
+        item = manager.group_tool_list.item(0)
+        self.assertTrue(item.flags() & Qt.ItemFlag.ItemIsEnabled)
+        item.setCheckState(Qt.CheckState.Checked)
+        with patch.object(service, "set_group_agent_tools") as save:
+            manager._save_group_tools()
+        save.assert_called_once_with("7", "agent", ["web_search"])
+        manager.close()
 
     def test_group_details_expose_agent_management_and_presets(self) -> None:
         from PySide6.QtWidgets import QComboBox

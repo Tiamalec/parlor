@@ -1,7 +1,7 @@
-"""Threaded TCP transport used by the Tkinter chat client.
+"""Threaded TCP transport used by the desktop client.
 
 The wire format is a four-byte unsigned big-endian payload length followed by a
-UTF-8 JSON object.  This module deliberately has no Tkinter dependency: network
+UTF-8 JSON object.  This module deliberately has no UI dependency: network
 events are delivered through a thread-safe queue and consumed by the GUI thread.
 """
 

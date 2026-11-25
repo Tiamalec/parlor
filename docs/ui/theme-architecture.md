@@ -1,6 +1,6 @@
 # Theme Architecture
 
-状态：架构已确认；阶段 3 主题基础设施已于 2026-11-17 实现。Lucide `IconProvider` 随阶段 4 图标资源迁移实现。
+状态：架构已确认；2026-11-25 起采用「会客厅」暖色主题基线，并新增 `ThemeMetrics`。服务端 Web 管理台共享 token，但使用独立 CSS 变量。
 
 ## 1. Qt 版本事实与兼容边界
 
@@ -13,7 +13,13 @@
 
 ### `ThemeTokens`
 
-不可变数据对象，只包含语义颜色、尺寸和状态值。不得引用 QWidget、Store 或 Service。
+不可变数据对象，包含语义颜色和状态值。不得引用 QWidget、Store 或 Service。新增角色必须同时补齐 Light/Dark，并通过对比度测试。
+
+### `ThemeMetrics`
+
+不可变布局度量对象，包含间距、圆角、控件高度、侧栏宽度、断点和字号。`ThemeSnapshot.metrics` 暴露同一份实例，QSS 与页面布局都从这里取值。
+
+字体通过 `display_font()` / `ui_font()` 生成 `QFont`，使用 `setFamilies()` 提供跨平台回退；标题使用系统衬线，正文使用系统 UI 无衬线。主题切换只更新调色板与 QSS，不重新创建字体管理器。
 
 ### `ThemeManager(QObject)`
 
@@ -28,7 +34,7 @@
 
 ### `QssBuilder`
 
-纯函数：`ThemeTokens -> str`。负责应用自有 QWidget 的确定性外观。禁止读取系统状态或业务状态。
+纯函数：`ThemeTokens -> str`。负责应用自有 QWidget 的确定性外观。禁止读取系统状态或业务状态。下拉箭头和勾选图标使用 Light/Dark 两套固定色 SVG 资源，避免 Qt 原生箭头在深色主题中不可见。
 
 ### `IconProvider`
 
@@ -86,6 +92,7 @@ Palette 至少映射 Window、WindowText、Base、AlternateBase、Text、Button�
 - Lucide SVG 作为受信任资源嵌入 `.qrc`。动态着色时从资源读取 SVG bytes，将受控的 `currentColor`/stroke 替换为 token 色，再用 `QSvgRenderer` 绘制。
 - 生成 pixmap 时使用 `logical_size * devicePixelRatio`，并设置 pixmap DPR；缓存键必须包含 DPR 和 theme revision。
 - 不在主题切换时修改 SVG 源文件或写临时资源。
+- 品牌标志几何不变；运行时品牌 SVG 使用 `brand_panel`、`on_brand_panel`、`agent` 重新着色。登录品牌区固定使用深色版本，不随应用浅色主题变成墨色标志。
 
 ## 9. Markdown、Mention 与消息刷新
 
@@ -118,3 +125,10 @@ ThemeManager 不向 AppStore 发 topic；Workspace 和 ChatPane 不因主题变�
 - 富文本：切换后代码块/Mention/AI 正文颜色更新，原始消息和 mention ID 不变。
 - 集成：主题切换前后 Store 对象、当前会话、消息数量、未发送编辑内容和网络连接保持不变。
 - 视觉：720×520、860×600、1180×760、≥1280 宽度；系统 Light/Dark × 应用 Light/Dark/System。
+
+## 12. 服务端管理台
+
+- `server/admin/static/styles.css` 使用独立 CSS 变量，不接入 Qt ThemeManager。
+- Light/Dark 通过 `prefers-color-scheme` 自动切换；颜色、字体和圆角与客户端语义保持同源。
+- `app.js` 只使用 `notice.good` / `notice.bad` 语义 class，不写内联背景色或文字色。
+- 管理台响应式断点：`≤1100px` 内容单列，`≤820px` 侧栏改顶部横向导航，`≤720px` 表单单列。

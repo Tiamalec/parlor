@@ -27,6 +27,12 @@ class ToolDefinition:
 
 
 TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
+    "web_search": ToolDefinition(
+        "web_search",
+        "联网搜索",
+        "按当前请求搜索公开网页，返回最多五条标题、摘要和来源。搜索词只取自当前请求。",
+        parameters={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
     "read_conversation_messages": ToolDefinition(
         "read_conversation_messages",
         "读取会话消息",
@@ -183,7 +189,8 @@ TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
     ),
 }
 
-DEFAULT_AGENT_TOOL_NAMES = tuple(TOOL_DEFINITIONS)
+DEFAULT_AGENT_TOOL_NAMES = tuple(name for name in TOOL_DEFINITIONS if name != "web_search")
+CONFIGURABLE_AGENT_TOOL_NAMES = tuple(TOOL_DEFINITIONS)
 
 
 def require_tool(name: str) -> ToolDefinition:

@@ -410,7 +410,7 @@ class AppStore:
             self.notify("agent")
             return
         if event_type == "agent.list":
-            self.state.agents = [dict(item) for item in payload.get("agents", [])]
+            self.state.agents = [self._agent_for_current_user(item) for item in payload.get("agents", [])]
             self.state.agent_models = [dict(item) for item in payload.get("models", [])]
             self.state.agent_presets = [dict(item) for item in payload.get("presets", [])]
             self.notify("agents")
@@ -422,7 +422,8 @@ class AppStore:
         if event_type in {"agent.created", "agent.updated", "agent.changed"}:
             agent = payload.get("agent")
             if isinstance(agent, dict):
-                self._upsert(self.state.agents, dict(agent))
+                agent = self._agent_for_current_user(agent)
+                self._upsert(self.state.agents, agent)
                 if not agent.get("enabled", True):
                     self._remove_agent_from_members(str(agent.get("id", "")))
                 else:
@@ -453,6 +454,10 @@ class AppStore:
         if event_type in {"agent.tools.list", "agent.tools.updated"}:
             agent_id = str(payload.get("agent_id", ""))
             self.state.agent_tools[agent_id] = [dict(item) for item in payload.get("tools", [])]
+            if event_type == "agent.tools.updated":
+                for key in list(self.state.group_agent_tools):
+                    if key[1] == agent_id:
+                        self.state.group_agent_tools.pop(key, None)
             self.notify("agents")
             return
         if event_type == "tool.list":
@@ -467,9 +472,10 @@ class AppStore:
             self.notify("details")
             return
         if event_type in {"agent.group.tools.list", "agent.group.tools.updated"}:
+            group_id = str(payload.get("group_id", ""))
             agent_id = str(payload.get("agent_id", ""))
-            if agent_id:
-                self.state.agent_tools[agent_id] = [dict(item) for item in payload.get("tools", [])]
+            if group_id and agent_id:
+                self.state.group_agent_tools[(group_id, agent_id)] = [dict(item) for item in payload.get("tools", [])]
             self.notify("agents")
             return
         if event_type == "memory.list":
@@ -593,6 +599,14 @@ class AppStore:
                 current.update(item)
                 return
         records.insert(0, item)
+
+    def _agent_for_current_user(self, agent: dict[str, Any]) -> dict[str, Any]:
+        item = dict(agent)
+        user = self.state.current_user
+        owned = user.get("id") is not None and item.get("owner_id") == user.get("id")
+        item["owned"] = owned
+        item["can_manage"] = owned or user.get("role") == "admin"
+        return item
 
     def _remove_agent(self, agent_id: str) -> None:
         if not agent_id:

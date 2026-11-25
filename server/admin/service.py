@@ -25,7 +25,8 @@ from server.stickers import (
 )
 
 from .auth import AdminAuthError, AdminSession, AdminSessionStore
-from .config_store import ModelProfile, ProviderConfigState, ProviderConfigStore
+from .config_store import ModelProfile, ProviderConfigState, ProviderConfigStore, SearchConfigStore
+from server.search_provider import SearchError, SearchSettings, TEST_QUERY, search
 
 
 class AdminRequestError(ValueError):
@@ -105,6 +106,9 @@ class AdminService:
         self._provider_state = self.config_store.load_state(
             agent.settings, agent.api_key, agent.enabled
         )
+        self.search_config_store = SearchConfigStore(config_store.directory.parent)
+        self._search_settings = self.search_config_store.load_search_settings()
+        self.agent.apply_search_settings(self._search_settings)
         active = self._provider_state.active()
         self.agent.apply_provider(active.settings, active.api_key, self._provider_label(active))
         self.agent.set_model_catalog(
@@ -168,6 +172,39 @@ class AdminService:
         value["kind"] = value["protocol"]
         value["api_key_set"] = bool(self.agent.api_key)
         return value
+
+    def search_provider_view(self) -> dict[str, Any]:
+        return self._search_settings.public_dict()
+
+    async def apply_search_provider(
+        self, session: AdminSession, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        async with self._config_lock:
+            current = self._search_settings
+            enabled = payload.get("enabled")
+            if type(enabled) is not bool:
+                raise AdminRequestError("enabled 必须是 boolean")
+            provider = str(payload.get("provider") or current.provider)
+            base_url = str(payload.get("base_url") or "") if provider == "searxng" else ""
+            supplied_key = payload.get("api_key")
+            if supplied_key is not None and not isinstance(supplied_key, str):
+                raise AdminRequestError("API Key 格式无效")
+            retained_key = current.api_key if provider == current.provider else ""
+            key = supplied_key or retained_key
+            candidate = SearchSettings(provider, base_url, key, enabled).validated()
+            if enabled:
+                try:
+                    results = await search(candidate, TEST_QUERY)
+                    if not results:
+                        raise SearchError("测试查询没有返回有效搜索结果", "invalid_response")
+                except SearchError as exc:
+                    await self._post_config_change(session, "search-provider.apply", provider, exc.category, "failed")
+                    raise AdminRequestError(f"搜索配置测试失败：{exc}") from exc
+            self.search_config_store.save_search_settings(candidate)
+            self._search_settings = candidate
+            self.agent.apply_search_settings(candidate)
+            await self._post_config_change(session, "search-provider.apply", provider, "enabled" if enabled else "disabled", "succeeded")
+            return candidate.public_dict()
 
     def provider_presets(self) -> dict[str, Any]:
         return {

@@ -96,6 +96,19 @@ class AgentCapabilityTests(unittest.TestCase):
         with self.assertRaises(DatabaseError):
             self.db.get_agent(agent["id"])
 
+    def test_admin_manages_builtin_agent_while_group_owner_only_manages_group_tools(self) -> None:
+        admin = self.db.register_user("admin01", "password-admin", role="admin")
+        builtin = DEFAULT_AGENT_ID
+        self.assertTrue(next(agent for agent in self.db.list_agents(admin["id"]) if agent["id"] == builtin)["can_manage"])
+        self.assertFalse(next(agent for agent in self.db.list_agents(self.alice["id"]) if agent["id"] == builtin)["can_manage"])
+        with self.assertRaises(DatabaseError):
+            self.db.set_agent_tools(builtin, self.alice["id"], ["web_search"])
+        group_tools = self.db.set_group_tools(self.group["id"], builtin, self.alice["id"], ["web_search"])
+        self.assertTrue(next(tool for tool in group_tools if tool["name"] == "web_search")["group_enabled"])
+        self.assertFalse(self.db.agent_tool_enabled(builtin, "web_search"))
+        self.db.set_agent_tools(builtin, admin["id"], [*DEFAULT_AGENT_TOOL_NAMES, "web_search"])
+        self.assertTrue(self.db.agent_tool_enabled(builtin, "web_search"))
+
     def test_builtin_role_presets_are_available_without_cluttering_groups(self) -> None:
         agents = {item["name"]: item for item in self.db.list_agents(self.alice["id"])}
         for name in ("永雏塔菲", "久留美", "千早爱音"):

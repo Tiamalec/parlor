@@ -1,4 +1,4 @@
-"""Typed client-side models shared by the legacy and V2 interfaces."""
+"""Typed client-side models shared by the V2 interface."""
 
 from __future__ import annotations
 
@@ -109,6 +109,7 @@ class AppState:
     agent_models: list[dict[str, Any]] = field(default_factory=list)
     agent_presets: list[dict[str, Any]] = field(default_factory=list)
     agent_tools: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    group_agent_tools: dict[tuple[str, str], list[dict[str, Any]]] = field(default_factory=dict)
     tool_definitions: list[dict[str, Any]] = field(default_factory=list)
     group_agents: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     memories: dict[tuple[str, str, str], list[dict[str, Any]]] = field(default_factory=dict)

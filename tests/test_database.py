@@ -4,6 +4,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from server.database import Database, DatabaseError, dm_conversation_id
@@ -32,6 +33,17 @@ class DatabaseTests(unittest.TestCase):
         if os.name == "posix":
             self.assertEqual(self.db.path.parent.stat().st_mode & 0o777, 0o700)
             self.assertEqual(self.db.path.stat().st_mode & 0o777, 0o600)
+
+    def test_wal_mode_and_admin_auth_survive_parallel_reads(self) -> None:
+        self.db.initialize("admin01", "password-admin")
+        with self.db._connect() as conn:
+            self.assertEqual(conn.execute("PRAGMA journal_mode").fetchone()[0], "wal")
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            reads = [pool.submit(self.db.list_users) for _ in range(60)]
+            login = pool.submit(self.db.authenticate, "admin01", "password-admin")
+            self.assertEqual(login.result(timeout=5)["role"], "admin")
+            for read in reads:
+                read.result(timeout=5)
 
     def test_identity_and_group_names_are_scoped_and_persist(self) -> None:
         first = self.db.create_group("研发组", self.alice["id"])

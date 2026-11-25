@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from server.model_provider import ProviderSettings, normalize_protocol, validate_api_key
+from server.search_provider import SearchSettings
 from server.provider_presets import preset_for_legacy
 
 
@@ -286,3 +287,42 @@ class ProviderConfigStore:
     def _chmod(path: Path, mode: int) -> None:
         if os.name == "posix":
             path.chmod(mode)
+
+
+class SearchConfigStore(ProviderConfigStore):
+    """One active search adapter, stored with the model config's file safeguards."""
+
+    def __init__(self, data_dir: Path) -> None:
+        super().__init__(data_dir)
+        self.settings_path = self.directory / "search-provider.json"
+        self.backup_path = self.directory / "search-provider.backup.json"
+
+    def load_search_settings(self) -> SearchSettings:
+        for path in (self.settings_path, self.backup_path):
+            try:
+                value = self._secure_read_json(path)
+                if value.get("schema_version") != 2:
+                    raise ValueError("搜索配置版本无效")
+                return SearchSettings(
+                    provider=str(value.get("provider") or ""),
+                    base_url=str(value.get("base_url") or ""),
+                    api_key=str(value.get("api_key") or ""),
+                    enabled=value.get("enabled") is True,
+                ).validated()
+            except FileNotFoundError:
+                continue
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                LOGGER.error("搜索配置不可用：%s", path.name)
+        return SearchSettings()
+
+    def save_search_settings(self, settings: SearchSettings) -> None:
+        checked = settings.validated()
+        self.directory.mkdir(parents=True, exist_ok=True)
+        self._chmod(self.directory, 0o700)
+        self._atomic_json(self.settings_path, {
+            "schema_version": 2,
+            "provider": checked.provider,
+            "base_url": checked.base_url,
+            "api_key": checked.api_key,
+            "enabled": checked.enabled,
+        }, 0o600)

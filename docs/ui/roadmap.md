@@ -1,5 +1,7 @@
 # UI Refactor Roadmap
 
+本页记录实现历史与待办，不是新页面的审美参考。视觉方向的当前判断见 `design-system.md` 第 0 节；阶段 1 曾冻结的风格已于 2026-11-25 重新校准。
+
 ## 范围分层
 
 - 主题缺陷修复：只消除系统 palette 泄漏和不可读背景。
@@ -16,10 +18,11 @@
 | 2. 工程基线与背景泄漏修复 | 完成 | Git 基线、文档、语义表面修复、主题边界测试 |
 | 3. 主题基础设施 | 完成 | Light/Dark/System、ThemeManager、QPalette、QSS builder、富文本与自绘刷新 |
 | 4. 公共视觉组件 | 进行中 | Lucide 导航资源与 Navigation Rail 已完成；其余公共组件按需迁移 |
-| 5. 页面迁移 | 进行中 | 聊天与通讯录已完成；AI、设置、管理页待迁移 |
-| 6. 清理与拆分 | 未开始 | application.py 渐进拆分、残余硬编码清理 |
+| 5. 页面迁移 | 进行中 | 聊天、通讯录、AI 任务中心、设置页已完成迁移记录；客户端管理页待迁移 |
+| 6. 清理与拆分 | 完成 | application.py 已拆分；服务端媒体校验与重复实现已收敛 |
+| 7. 会客厅视觉基线 | 完成 | 暖色 token、三档侧栏、登录、消息、通讯、任务、待办、设置与管理台重设计 |
 
-## 阶段 2：当前阶段
+## 阶段 2：历史记录
 
 ### 完成记录（2026-11-17）
 
@@ -195,7 +198,47 @@
 - 清理局部 `setStyleSheet()` 与颜色字面量 allowlist。
 - 按 `component-guidelines.md` 顺序拆分 `application.py`。
 - 格式化管理台代码可另立任务；不接入客户端 ThemeManager。
-- Legacy 客户端保持冻结。
+
+### 完成记录（2026-11-25）
+
+- `application.py` 从 5,042 行拆分到 `client/v2/pages/` 与 `client/v2/shell/`，原模块保留兼容导出。
+- 页面类、Signal、Service 调用、Store topic 和布局未改动；测试中一处 `QFileDialog` patch 路径随模块移动更新。
+- 服务端图片校验抽到 `server/media.py`，并删除 `server/stickers.py` 的重复实现。
+- `server/app.py` 收缩为组合根，协议处理器拆到 `server/handlers/`，会话与共享常量独立成模块。
+- `server/database.py` 与 `server/agent.py` 收缩为组合根，数据域与 Agent 运行时分别拆到 `server/storage/` 和 `server/agent_runtime/`。
+- 旧 Tkinter 客户端与 `--legacy` 入口已删除，桌面端只保留 PySide6 V2。
+- 完整测试 235 项通过，1 项实时 Ollama 测试跳过；Windows、Linux 视觉验收仍为未验证。
+
+## 阶段 7：会客厅视觉基线（2026-11-25）
+
+### 目标
+
+- 用暖象牙、深森林绿、暖紫褐和衬线标题替换旧蓝灰视觉，形成后续 UI 开发基线。
+- 覆盖 V2 登录、消息、通讯、AI 任务、待办、设置、客户端管理页，以及服务端 Web 管理台。
+- 保持 `NetworkClient -> ChatService -> AppStore -> UI`、Signal、Store topic 和协议不变。
+
+### 已落地
+
+- `ThemeTokens` 增加 `on_primary`、`brand_panel`、`on_brand_panel`、`brand_accent`；新增 `ThemeMetrics` 和 `display_font()` / `ui_font()`。
+- 全局 QSS 重写为暖色表面、森林绿主操作、紫褐 Agent、12px 面板圆角、系统衬线标题。
+- 侧栏改为 236/76/64px 三档，带品牌字标、账号区和固定底部设置。
+- 登录页改为深绿品牌面板 + 暖象牙表单面板；窄屏隐藏品牌区。
+- 消息页会话行 72px，选中态带左侧指示；预览支持省略，避免被未读徽标遮挡。
+- 通讯录、AI 任务、待办、设置和管理页改为页面头 + 连续列表/分区。
+- 服务端管理台使用同一套暖色 CSS 变量，跟随系统深浅模式，通知提示改用语义 class。
+- `tools/ui_snapshot.py` 可离屏生成四档宽度 × 浅深主题的基线截图。
+
+### 验收记录
+
+- 基线截图已生成到 `docs/ui/screenshots/baseline-2026-11/`，旧截图归档到 `docs/ui/screenshots/archive-2026-11/`。
+- 客户端覆盖四档宽度 × 浅深主题；管理台覆盖三种宽度 × 浅深主题，并包含登录页。
+- 完整测试 237 项通过，1 项显式启用的本地 Ollama 实时测试跳过；`compileall` 与 Qt Resource 再生成一致性检查通过。
+- 本轮使用 Qt offscreen 与 Chrome 无头渲染完成视觉检查；真实 macOS 窗口标题栏、Windows/Linux 字体与渲染仍未验证。
+
+### 回滚
+
+- 主题、壳层和页面改动按阶段提交；如需回滚，恢复到本阶段前提交。
+- 服务端管理台仅修改 `server/admin/static/`，不涉及 API 或数据库。
 
 ## 全局验收矩阵
 

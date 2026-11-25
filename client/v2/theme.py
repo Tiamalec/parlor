@@ -7,7 +7,7 @@ from enum import Enum
 from typing import Callable
 
 from PySide6.QtCore import QObject, QSettings, QTimer, Qt, Signal
-from PySide6.QtGui import QColor, QGuiApplication, QPalette
+from PySide6.QtGui import QColor, QFont, QGuiApplication, QPalette
 from PySide6.QtWidgets import QApplication
 
 
@@ -38,6 +38,10 @@ class ThemeTokens:
     primary_hover: str
     primary_pressed: str
     primary_subtle: str
+    on_primary: str
+    brand_panel: str
+    on_brand_panel: str
+    brand_accent: str
     agent: str
     agent_subtle: str
     success: str
@@ -66,82 +70,90 @@ class ThemeTokens:
 
 
 LIGHT_TOKENS = ThemeTokens(
-    canvas="#F5F7FA",
-    surface="#FFFFFF",
-    surface_subtle="#F8FAFC",
-    surface_elevated="#FFFFFF",
-    text_primary="#172033",
-    text_secondary="#566176",
-    text_tertiary="#667085",
-    text_disabled="#98A2B3",
-    border="#DCE2EA",
-    border_strong="#C5CEDA",
-    primary="#356AE6",
-    primary_hover="#2C5CD0",
-    primary_pressed="#244EAF",
-    primary_subtle="#EAF0FF",
-    agent="#6B4FD3",
-    agent_subtle="#F1ECFF",
-    success="#21865B",
-    warning="#B8660B",
-    danger="#C43D45",
-    overlay_scrim="rgba(15, 23, 42, 0.42)",
-    scrollbar="#C0C8D4",
-    message_incoming="#FFFFFF",
-    message_outgoing="#E8F0FF",
-    message_agent="#F4F0FF",
-    message_agent_border="#DDD3FF",
-    mention_user_bg="#EDF3FF",
-    mention_user_fg="#2F5FD0",
-    mention_agent_bg="#F1ECFF",
-    mention_agent_fg="#6848C7",
-    code_bg="#111827",
-    code_fg="#E5E7EB",
-    avatar_user="#356AE6",
-    avatar_text="#FFFFFF",
-    switch_off="#C5CEDA",
-    switch_disabled="#DCE2EA",
-    switch_knob="#FFFFFF",
+    canvas="#F3EFE7",
+    surface="#FBF8F2",
+    surface_subtle="#EFE9DD",
+    surface_elevated="#FFFDF8",
+    text_primary="#232A25",
+    text_secondary="#4F5A52",
+    text_tertiary="#666E66",
+    text_disabled="#9A9A8F",
+    border="#DED5C6",
+    border_strong="#C8BCA9",
+    primary="#2E5E4E",
+    primary_hover="#264F42",
+    primary_pressed="#1E4036",
+    primary_subtle="#E4EEE8",
+    on_primary="#FFFDF8",
+    brand_panel="#2E5E4E",
+    on_brand_panel="#FFFDF8",
+    brand_accent="#D9C3A7",
+    agent="#7A4B5A",
+    agent_subtle="#F3E7E9",
+    success="#2F6B4F",
+    warning="#8A5A17",
+    danger="#A13F3F",
+    overlay_scrim="rgba(23, 27, 24, 0.48)",
+    scrollbar="#C3B9A8",
+    message_incoming="#FFFDF8",
+    message_outgoing="#E1EBE4",
+    message_agent="#F5EDEE",
+    message_agent_border="#E3D2D5",
+    mention_user_bg="#E4EEE8",
+    mention_user_fg="#244A3E",
+    mention_agent_bg="#F3E7E9",
+    mention_agent_fg="#6B3F4C",
+    code_bg="#1F2823",
+    code_fg="#F1ECE2",
+    avatar_user="#2E5E4E",
+    avatar_text="#FFFDF8",
+    switch_off="#C8BCA9",
+    switch_disabled="#DED5C6",
+    switch_knob="#FFFDF8",
 )
 
 
 DARK_TOKENS = ThemeTokens(
-    canvas="#0F141C",
-    surface="#151B24",
-    surface_subtle="#1A2230",
-    surface_elevated="#202938",
-    text_primary="#F3F6FA",
-    text_secondary="#B7C0CE",
-    text_tertiary="#98A5B7",
-    text_disabled="#687486",
-    border="#2D3746",
-    border_strong="#3E4A5C",
-    primary="#7EA2FF",
-    primary_hover="#96B3FF",
-    primary_pressed="#668FF7",
-    primary_subtle="#1D2B4F",
-    agent="#B59CFF",
-    agent_subtle="#2A2247",
-    success="#58C996",
-    warning="#F2B45D",
-    danger="#FF7A7A",
-    overlay_scrim="rgba(0, 0, 0, 0.58)",
-    scrollbar="#465266",
-    message_incoming="#1A2230",
-    message_outgoing="#20345D",
-    message_agent="#29213F",
-    message_agent_border="#493A70",
-    mention_user_bg="#20345D",
-    mention_user_fg="#AFC5FF",
-    mention_agent_bg="#2A2247",
-    mention_agent_fg="#C4B5FD",
-    code_bg="#0B0F15",
-    code_fg="#E6EBF2",
-    avatar_user="#668FF7",
-    avatar_text="#FFFFFF",
-    switch_off="#465266",
-    switch_disabled="#2D3746",
-    switch_knob="#F3F6FA",
+    canvas="#171B18",
+    surface="#1E231F",
+    surface_subtle="#252B26",
+    surface_elevated="#2B322C",
+    text_primary="#F1ECE2",
+    text_secondary="#C4C0B6",
+    text_tertiary="#A7A49A",
+    text_disabled="#6E756D",
+    border="#3A413A",
+    border_strong="#4C544C",
+    primary="#8FBFA9",
+    primary_hover="#A8D0BD",
+    primary_pressed="#74A590",
+    primary_subtle="#24362D",
+    on_primary="#171B18",
+    brand_panel="#24362D",
+    on_brand_panel="#F1ECE2",
+    brand_accent="#D3A7B4",
+    agent="#D3A7B4",
+    agent_subtle="#36262B",
+    success="#7FBF9B",
+    warning="#D6A45C",
+    danger="#E08B86",
+    overlay_scrim="rgba(0, 0, 0, 0.64)",
+    scrollbar="#4A524A",
+    message_incoming="#232A25",
+    message_outgoing="#263A30",
+    message_agent="#30262A",
+    message_agent_border="#4A3A40",
+    mention_user_bg="#24362D",
+    mention_user_fg="#A8D0BD",
+    mention_agent_bg="#36262B",
+    mention_agent_fg="#E0B7C2",
+    code_bg="#0F1310",
+    code_fg="#EDE8DD",
+    avatar_user="#8FBFA9",
+    avatar_text="#171B18",
+    switch_off="#4A524A",
+    switch_disabled="#3A413A",
+    switch_knob="#F1ECE2",
 )
 
 
@@ -149,10 +161,55 @@ TOKENS_BY_VARIANT = {ThemeVariant.LIGHT: LIGHT_TOKENS, ThemeVariant.DARK: DARK_T
 
 
 @dataclass(frozen=True, slots=True)
+class ThemeMetrics:
+    """Frozen layout and type measurements shared by QSS and page layouts."""
+
+    space_xs: int = 4
+    space_sm: int = 8
+    space_md: int = 12
+    space_lg: int = 16
+    space_xl: int = 24
+    space_2xl: int = 32
+    space_3xl: int = 40
+    radius_sm: int = 6
+    radius_md: int = 8
+    radius_lg: int = 12
+    radius_xl: int = 16
+    control_compact: int = 28
+    control_default: int = 36
+    control_primary: int = 40
+    nav_row: int = 40
+    sidebar_wide: int = 236
+    sidebar_medium: int = 76
+    sidebar_compact: int = 64
+    page_margin_wide: int = 24
+    page_margin_compact: int = 16
+    chat_split_breakpoint: int = 1040
+    sidebar_label_breakpoint: int = 1180
+    sidebar_medium_breakpoint: int = 900
+    details_dock_breakpoint: int = 1360
+    font_micro: int = 11
+    font_caption: int = 12
+    font_body: int = 14
+    font_section: int = 17
+    font_page: int = 26
+    font_page_compact: int = 22
+    font_hero: int = 34
+    font_metric: int = 30
+    font_display_family: str = "Iowan Old Style, Palatino Linotype, Songti SC, STSong, Noto Serif CJK SC, Source Han Serif SC, SimSun, serif"
+    font_ui_family: str = "PingFang SC, Hiragino Sans GB, Microsoft YaHei UI, Noto Sans CJK SC, system-ui, sans-serif"
+    font_mono_family: str = "SF Mono, Menlo, Consolas, Liberation Mono, monospace"
+
+
+METRICS = ThemeMetrics()
+
+
+@dataclass(frozen=True, slots=True)
 class ThemeSnapshot:
     mode: ThemeMode
     variant: ThemeVariant
     tokens: ThemeTokens
+    metrics: ThemeMetrics
     revision: int
 
 
@@ -167,7 +224,7 @@ def build_palette(tokens: ThemeTokens) -> QPalette:
         QPalette.ColorRole.Button: tokens.surface,
         QPalette.ColorRole.ButtonText: tokens.text_primary,
         QPalette.ColorRole.Highlight: tokens.primary,
-        QPalette.ColorRole.HighlightedText: tokens.surface,
+        QPalette.ColorRole.HighlightedText: tokens.on_primary,
         QPalette.ColorRole.ToolTipBase: tokens.surface_elevated,
         QPalette.ColorRole.ToolTipText: tokens.text_primary,
         QPalette.ColorRole.PlaceholderText: tokens.text_disabled,
@@ -181,27 +238,49 @@ def build_palette(tokens: ThemeTokens) -> QPalette:
     return palette
 
 
+def display_font(size: int = METRICS.font_page, weight: int = QFont.Weight.DemiBold) -> QFont:
+    """Return the serif display face with deterministic system fallbacks."""
+
+    font = QFont()
+    font.setFamilies([part.strip() for part in METRICS.font_display_family.split(",")])
+    font.setPixelSize(size)
+    font.setWeight(weight)
+    return font
+
+
+def ui_font(size: int = METRICS.font_body, weight: int = QFont.Weight.Normal) -> QFont:
+    font = QFont()
+    font.setFamilies([part.strip() for part in METRICS.font_ui_family.split(",")])
+    font.setPixelSize(size)
+    font.setWeight(weight)
+    return font
+
+
 def build_stylesheet(c: ThemeTokens) -> str:
+    dark = c is DARK_TOKENS
+    chevron = "chevron-down-dark" if dark else "chevron-down-light"
+    check = "check-dark" if dark else "check-light"
     return f"""
     * {{ font-size: 14px; color: {c.text_primary}; }}
+    QWidget {{ font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Noto Sans CJK SC", system-ui, sans-serif; }}
     QMainWindow, QWidget#AppRoot, QWidget[surfaceRole="canvas"] {{ background: {c.canvas}; }}
     QWidget[surfaceRole="surface"] {{ background: {c.surface}; }}
     QWidget[surfaceRole="subtle"] {{ background: {c.surface_subtle}; }}
     QWidget[surfaceRole="elevated"] {{ background: {c.surface_elevated}; }}
-    QFrame#Surface, QWidget#Surface {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 10px; }}
-    QFrame#DetailsPanel {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 10px; }}
+    QFrame#Surface, QWidget#Surface {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 12px; }}
+    QFrame#DetailsPanel {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 12px; }}
     QFrame#DetailsOverview {{ background: {c.surface_subtle}; border: none; border-radius: 10px; }}
     QFrame#MemberRow {{ background: transparent; border: none; border-radius: 8px; }}
     QFrame#MemberRow:hover, QFrame#ConversationCard:hover {{ background: {c.surface_subtle}; }}
-    QFrame#ConversationCard {{ background: transparent; border: none; border-radius: 8px; }}
-    QFrame#ConversationCard[selected="true"] {{ background: {c.primary_subtle}; }}
+    QFrame#ConversationCard {{ background: transparent; border: none; border-left: 3px solid transparent; border-radius: 8px; }}
+    QFrame#ConversationCard[selected="true"] {{ background: {c.primary_subtle}; border-left: 3px solid {c.primary}; }}
     QFrame#ProfileCard {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 12px; }}
     QFrame#ProfilePane {{ background: transparent; border: none; }}
     QFrame#ProfilePopover {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: 12px; }}
     QScrollArea#ProfileCardScroll, QWidget#ProfileCardViewport {{ background: transparent; border: none; }}
     QFrame#TaskRow {{ background: transparent; border: none; border-bottom: 1px solid {c.border}; border-radius: 0; }}
     QFrame#TaskRow:hover {{ background: {c.surface_subtle}; }}
-    QFrame#TodoWorkspace {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 12px; }}
+    QFrame#TodoWorkspace {{ background: {c.surface}; border: none; border-radius: 0; }}
     QLabel#TodoPageTitle {{ color: {c.text_primary}; font-size: 26px; font-weight: 700; }}
     QLabel#TodoSummary {{ color: {c.text_secondary}; font-size: 13px; padding-left: 4px; }}
     QLineEdit#TodoQuickInput {{ min-height: 26px; padding: 8px 12px; background: {c.surface}; border: 1px solid {c.border_strong}; border-radius: 8px; font-size: 14px; }}
@@ -264,26 +343,74 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QFrame#TodoDetailFooter {{ background: {c.surface}; border: none; border-top: 1px solid {c.border}; }}
     QFrame#SettingsSection {{ background: transparent; border: none; border-bottom: 1px solid {c.border}; }}
     QFrame#SettingsRow {{ background: transparent; border: none; }}
-    QFrame#Rail {{ background: {c.surface}; border: none; border-right: 1px solid {c.border}; }}
+    QFrame#SettingsSidebar {{ background: transparent; border: none; border-right: 1px solid {c.border}; }}
+    QListWidget#SettingsNav {{ background: transparent; border: none; padding: 0 14px 0 0; }}
+    QListWidget#SettingsNav::item {{ min-height: 38px; padding: 7px 12px; border-radius: 8px; color: {c.text_secondary}; }}
+    QListWidget#SettingsNav::item:hover {{ background: {c.surface_subtle}; color: {c.text_primary}; }}
+    QListWidget#SettingsNav::item:selected {{ background: {c.primary_subtle}; color: {c.primary}; font-weight: 600; }}
+    QFrame#Sidebar, QFrame#Rail {{ background: {c.surface}; border: none; border-right: 1px solid {c.border}; }}
+    QFrame#ConversationPane {{ background: {c.surface}; border: none; border-right: 1px solid {c.border}; border-radius: 0; }}
+    QFrame#ChatSurface {{ background: {c.surface}; border: none; border-radius: 0; }}
+    QFrame#SidebarBrand {{ background: transparent; border: none; }}
+    QLabel#SidebarWordmark {{ font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", "STSong", "Noto Serif CJK SC", serif; font-size: 21px; font-weight: 600; color: {c.text_primary}; }}
+    QLabel#SidebarMeta {{ color: {c.text_tertiary}; font-size: 11px; }}
+    QLabel#SidebarSection {{ color: {c.text_tertiary}; font-size: 11px; font-weight: 600; padding: 0 12px; }}
+    QFrame#SidebarUser {{ background: {c.surface_subtle}; border: 1px solid {c.border}; border-radius: 10px; }}
+    QLabel#SidebarUserName {{ color: {c.text_primary}; font-size: 13px; font-weight: 600; }}
+    QLabel#SidebarUserRole {{ color: {c.text_tertiary}; font-size: 11px; }}
+    QToolButton#SidebarAction {{ color: {c.text_secondary}; background: transparent; border: 1px solid transparent; border-radius: 8px; min-width: 30px; min-height: 30px; }}
+    QToolButton#SidebarAction:hover {{ color: {c.text_primary}; background: {c.surface}; }}
+    QToolButton#SidebarAction:focus {{ border: 2px solid {c.primary}; }}
     QFrame#DetailsScrim {{ background: {c.overlay_scrim}; border: none; }}
     QWidget#ChatHeader {{ background: {c.surface}; border-bottom: 1px solid {c.border}; }}
     QWidget#Composer {{ background: {c.surface}; border-top: 1px solid {c.border}; }}
-    QStackedWidget#ContactDetails {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 10px; }}
+    QFrame#ContactsDirectory {{ background: {c.surface}; border: none; border-right: 1px solid {c.border}; border-radius: 0; }}
+    QStackedWidget#ContactDetails {{ background: transparent; border: none; border-radius: 0; }}
     QStackedWidget#SettingsContent {{ background: transparent; border: none; }}
-    QLabel#PageTitle {{ font-size: 20px; font-weight: 700; }}
-    QLabel#SectionTitle {{ font-size: 16px; font-weight: 600; }}
-    QLabel#ProfileName {{ font-size: 20px; font-weight: 700; }}
-    QLabel#MetricValue {{ font-size: 26px; font-weight: 700; }}
+    QWidget#PageHeader {{ background: transparent; border: none; }}
+    QLabel#PageEyebrow {{ color: {c.primary}; font-size: 11px; font-weight: 600; }}
+    QLabel#PageTitle {{ font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", "STSong", "Noto Serif CJK SC", serif; font-size: 26px; font-weight: 600; }}
+    QLabel#PageSubtitle {{ color: {c.text_secondary}; font-size: 13px; }}
+    QLabel#SectionTitle {{ font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", "STSong", "Noto Serif CJK SC", serif; font-size: 17px; font-weight: 600; }}
+    QLabel#SectionMeta {{ color: {c.text_tertiary}; font-size: 12px; }}
+    QFrame#FilterBar {{ background: transparent; border: none; }}
+    QFrame#SegmentedTabs, QFrame#AuthModeTrack {{ background: {c.surface_subtle}; border: 1px solid {c.border}; border-radius: 9px; }}
+    QPushButton#SegmentedTab {{ min-height: 30px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: {c.text_secondary}; font-size: 13px; }}
+    QPushButton#SegmentedTab:checked {{ background: {c.surface_elevated}; border-color: {c.border}; color: {c.primary}; font-weight: 600; }}
+    QPushButton#SegmentedTab:focus {{ border: 2px solid {c.primary}; }}
+    QToolButton#IconButton {{ color: {c.text_secondary}; background: transparent; border: 1px solid transparent; border-radius: 8px; }}
+    QToolButton#IconButton:hover {{ color: {c.text_primary}; background: {c.surface_subtle}; }}
+    QToolButton#IconButton:pressed {{ background: {c.primary_subtle}; color: {c.primary_pressed}; }}
+    QToolButton#IconButton:checked {{ background: {c.primary_subtle}; color: {c.primary}; }}
+    QToolButton#IconButton:focus {{ border: 2px solid {c.primary}; }}
+    QLabel#StatusBadge {{ color: {c.text_secondary}; background: {c.surface_subtle}; border: 1px solid {c.border}; border-radius: 10px; padding: 2px 8px; font-size: 11px; font-weight: 600; }}
+    QLabel#StatusBadge[statusKind="success"] {{ color: {c.success}; background: {c.primary_subtle}; border-color: {c.border}; }}
+    QLabel#StatusBadge[statusKind="warning"] {{ color: {c.warning}; background: {c.surface_subtle}; }}
+    QLabel#StatusBadge[statusKind="danger"] {{ color: {c.danger}; background: {c.surface_subtle}; }}
+    QLabel#StatusBadge[statusKind="agent"] {{ color: {c.agent}; background: {c.agent_subtle}; border-color: {c.message_agent_border}; }}
+    QFrame#StatTile {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 12px; }}
+    QLabel#ProfileName {{ font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", "STSong", "Noto Serif CJK SC", serif; font-size: 22px; font-weight: 600; }}
+    QLabel#MetricValue {{ font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", "STSong", "Noto Serif CJK SC", serif; font-size: 30px; font-weight: 600; }}
     QLabel#EmptyStateIcon {{ font-size: 42px; }}
-    QLabel#EmptyStateWordmark {{ font-size: 28px; font-weight: 700; }}
-    QLabel#EmptyStateTitle {{ font-size: 18px; font-weight: 700; }}
+    QLabel#EmptyStateWordmark {{ font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", "STSong", "Noto Serif CJK SC", serif; font-size: 30px; font-weight: 600; }}
+    QLabel#EmptyStateTitle {{ font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", "STSong", "Noto Serif CJK SC", serif; font-size: 20px; font-weight: 600; }}
     QLabel#AuthBrandTile {{ background: {c.primary_subtle}; border: 1px solid {c.border}; border-radius: 12px; }}
     QLabel#AuthWordmark {{ font-size: 16px; font-weight: 700; }}
     QLabel#AuthWordmarkMeta {{ color: {c.text_tertiary}; font-size: 12px; }}
-    QLabel#AuthHeroTitle {{ font-size: 24px; font-weight: 700; }}
+    QLabel#AuthHeroTitle {{ font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", "STSong", "Noto Serif CJK SC", serif; font-size: 34px; font-weight: 600; }}
     QLabel#AuthHeroText {{ color: {c.text_secondary}; font-size: 14px; }}
     QLabel#AuthFeatureText {{ color: {c.text_secondary}; }}
-    QLabel#AuthHeading {{ font-size: 20px; font-weight: 700; }}
+    QLabel#AuthHeading {{ font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", "STSong", "Noto Serif CJK SC", serif; font-size: 26px; font-weight: 600; }}
+    QWidget#AuthShell {{ background: {c.canvas}; }}
+    QWidget#AuthHeroPanel {{ background: {c.brand_panel}; border: none; }}
+    QWidget#AuthHeroPanel QLabel#AuthWordmark {{ color: {c.on_brand_panel}; font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", "STSong", "Noto Serif CJK SC", serif; font-size: 20px; font-weight: 600; }}
+    QWidget#AuthHeroPanel QLabel#AuthWordmarkMeta {{ color: {c.brand_accent}; font-size: 11px; }}
+    QWidget#AuthHeroPanel QLabel#AuthBrandTile {{ background: transparent; border: none; }}
+    QWidget#AuthHeroPanel QLabel#AuthHeroTitle {{ color: {c.on_brand_panel}; font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", "STSong", "Noto Serif CJK SC", serif; font-size: 38px; font-weight: 600; }}
+    QWidget#AuthHeroPanel QLabel#AuthHeroText {{ color: {c.on_brand_panel}; font-size: 14px; }}
+    QWidget#AuthHeroPanel QLabel#AuthFeatureText {{ color: {c.on_brand_panel}; font-size: 13px; }}
+    QFrame#AuthFormPanel {{ background: {c.canvas}; border: none; }}
+    QFrame#AuthFormCard {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 16px; }}
     QFrame#AuthModeTrack {{ background: {c.surface_subtle}; border: 1px solid {c.border}; border-radius: 8px; }}
     QPushButton#AuthModeTab {{ min-height: 30px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: {c.text_secondary}; }}
     QPushButton#AuthModeTab:hover {{ color: {c.text_primary}; background: {c.surface}; }}
@@ -298,7 +425,7 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QLabel#AuthStatusDot[connectionState="offline"] {{ background: {c.danger}; }}
     QLabel#AuthStatusText {{ color: {c.text_secondary}; font-size: 12px; }}
     QLabel#AuthServer {{ color: {c.text_tertiary}; font-size: 11px; }}
-    QLabel#NavBadge {{ color: {c.surface}; background: {c.danger}; border: none; border-radius: 7px; min-width: 14px; min-height: 14px; padding: 0 3px; font-size: 9px; font-weight: 700; }}
+    QLabel#NavBadge {{ color: {c.on_primary}; background: {c.danger}; border: none; border-radius: 8px; min-width: 16px; min-height: 16px; padding: 0 4px; font-size: 10px; font-weight: 700; }}
     QLabel#TaskTitle {{ font-weight: 600; }}
     QLabel#TaskStatus {{ color: {c.text_secondary}; background: {c.surface_subtle}; border-radius: 6px; padding: 4px 8px; font-size: 12px; }}
     QLabel#TaskStatus[taskStatus="running"] {{ color: {c.warning}; }}
@@ -316,7 +443,7 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QLabel#DetailsSectionTitle {{ font-size: 13px; font-weight: 600; color: {c.text_secondary}; }}
     QLabel#MemberName, QLabel#ConversationTitle {{ font-weight: 600; }}
     QLabel#ConversationTime {{ color: {c.text_tertiary}; font-size: 12px; }}
-    QLabel#UnreadBadge {{ background: {c.danger}; color: {c.surface}; border-radius: 11px; font-size: 11px; font-weight: 700; }}
+    QLabel#UnreadBadge {{ background: {c.danger}; color: {c.on_primary}; border-radius: 11px; font-size: 11px; font-weight: 700; }}
     QLabel#RoleBadge {{ color: {c.text_secondary}; background: {c.surface_subtle}; border-radius: 8px; padding: 3px 7px; font-size: 12px; }}
     QLabel#AgentBadge {{ color: {c.agent}; background: {c.agent_subtle}; border-radius: 8px; padding: 3px 7px; font-size: 12px; font-weight: 600; }}
     QLabel#AgentBadge[online="false"] {{ color: {c.text_secondary}; background: {c.surface_subtle}; }}
@@ -324,7 +451,7 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QLabel#AgentMessageSender {{ color: {c.agent}; font-size: 12px; font-weight: 600; }}
     QLabel#AgentActivity {{ color: {c.text_secondary}; padding: 3px 5px; }}
     QLabel#SystemMessage {{ color: {c.text_tertiary}; background: {c.surface_subtle}; border-radius: 8px; padding: 6px 12px; }}
-    QFrame#MessageBubble {{ border: 1px solid {c.border}; border-radius: 10px; }}
+    QFrame#MessageBubble {{ border: 1px solid {c.border}; border-radius: 12px; }}
     QFrame#MessageBubble[messageRole="incoming"] {{ background: {c.message_incoming}; }}
     QFrame#MessageBubble[messageRole="outgoing"] {{ background: {c.message_outgoing}; }}
     QFrame#MessageBubble[messageRole="agent"] {{ background: {c.message_agent}; border-color: {c.message_agent_border}; }}
@@ -366,7 +493,7 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QFrame#CardImportNotice[state="partial"] QLabel#CardImportFeedback {{ color: {c.warning}; }}
     QFrame#CardImportNotice[state="pending"] QLabel#CardImportFeedback {{ color: {c.primary}; }}
     QPushButton#CardImportAction {{ min-height: 28px; padding: 0 10px; border: 1px solid {c.primary}; border-radius: 7px; background: {c.primary_subtle}; color: {c.primary}; font-size: 12px; font-weight: 600; }}
-    QPushButton#CardImportAction:hover {{ background: {c.primary}; color: {c.surface}; }}
+    QPushButton#CardImportAction:hover {{ background: {c.primary}; color: {c.on_primary}; }}
     QPushButton#CardImportAction:disabled {{ color: {c.text_disabled}; background: {c.surface_subtle}; border-color: {c.border}; }}
     QPushButton#CardTaskTodoAction {{ min-height: 22px; padding: 0 4px; border: none; border-radius: 5px; background: transparent; color: {c.primary}; font-size: 11px; }}
     QPushButton#CardTaskTodoAction:hover {{ background: {c.primary_subtle}; }}
@@ -375,7 +502,7 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QPushButton:pressed {{ background: {c.primary_subtle}; }}
     QPushButton:focus {{ border: 2px solid {c.primary}; }}
     QPushButton:disabled {{ color: {c.text_disabled}; background: {c.surface_subtle}; }}
-    QPushButton#Primary {{ color: {c.surface}; background: {c.primary}; border-color: {c.primary}; font-weight: 600; }}
+    QPushButton#Primary {{ color: {c.on_primary}; background: {c.primary}; border-color: {c.primary}; font-weight: 600; }}
     QPushButton#Primary:hover {{ background: {c.primary_hover}; }}
     QPushButton#Primary:pressed {{ background: {c.primary_pressed}; }}
     QPushButton#Primary:disabled {{ color: {c.text_disabled}; background: {c.surface_subtle}; border-color: {c.border}; }}
@@ -388,7 +515,7 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QPushButton#CardAction:disabled {{ color: {c.text_disabled}; }}
     QPushButton#QuotedMessage {{ min-height: 28px; padding: 4px 8px; border: 1px solid {c.border}; border-radius: 8px; background: {c.surface_subtle}; color: {c.text_secondary}; text-align: left; }}
     QPushButton#QuotedMessage:hover {{ background: {c.primary_subtle}; color: {c.text_primary}; }}
-    QPushButton#NewMessagesBadge {{ min-height: 22px; padding: 3px 11px; border: 1px solid {c.primary}; border-radius: 13px; background: {c.primary}; color: {c.surface}; font-size: 12px; font-weight: 600; }}
+    QPushButton#NewMessagesBadge {{ min-height: 22px; padding: 3px 11px; border: 1px solid {c.primary}; border-radius: 13px; background: {c.primary}; color: {c.on_primary}; font-size: 12px; font-weight: 600; }}
     QPushButton#NewMessagesBadge:hover {{ background: {c.primary_hover}; border-color: {c.primary_hover}; }}
     QPushButton#NewMessagesBadge:pressed {{ background: {c.primary_pressed}; border-color: {c.primary_pressed}; }}
     QPushButton#NewMessagesBadge:focus {{ border: 2px solid {c.surface}; }}
@@ -398,26 +525,41 @@ def build_stylesheet(c: ThemeTokens) -> str:
     QPushButton#SegmentedTab {{ min-height: 32px; border: none; background: transparent; color: {c.text_secondary}; }}
     QPushButton#SegmentedTab:hover {{ background: {c.surface_subtle}; color: {c.text_primary}; }}
     QPushButton#SegmentedTab:checked {{ background: {c.primary_subtle}; color: {c.primary}; font-weight: 600; }}
-    QToolButton#NavItem {{ color: {c.text_secondary}; background: transparent; border: 1px solid transparent; border-radius: 10px; padding: 4px 2px 3px 2px; font-size: 12px; font-weight: 400; }}
+    QToolButton#NavItem {{ color: {c.text_secondary}; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 0 12px; font-size: 13px; font-weight: 400; text-align: left; }}
     QToolButton#NavItem:hover {{ color: {c.text_primary}; background: {c.surface_subtle}; }}
     QToolButton#NavItem:pressed {{ color: {c.primary_pressed}; background: {c.primary_subtle}; }}
-    QToolButton#NavItem:checked {{ color: {c.primary}; background: {c.primary_subtle}; }}
+    QToolButton#NavItem:checked {{ color: {c.primary}; background: {c.primary_subtle}; font-weight: 600; }}
     QToolButton#NavItem:checked:hover {{ color: {c.primary_hover}; background: {c.primary_subtle}; }}
-    QToolButton#NavItem:focus {{ border: 1px solid transparent; border-bottom: 2px solid {c.primary}; }}
+    QToolButton#NavItem:focus {{ border: 2px solid {c.primary}; }}
+    QToolButton#NavItem[compact="true"] {{ padding: 2px 0; text-align: center; font-size: 11px; }}
     QToolButton#NavItem:disabled {{ color: {c.text_disabled}; background: transparent; }}
     QPushButton#DangerButton {{ color: {c.danger}; }}
-    QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox, QDateTimeEdit, QTimeEdit {{ color: {c.text_primary}; background: {c.surface}; border: 1px solid {c.border}; border-radius: 8px; padding: 8px 10px; selection-background-color: {c.primary}; selection-color: {c.surface}; }}
+    QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox, QDateTimeEdit, QTimeEdit {{ color: {c.text_primary}; background: {c.surface}; border: 1px solid {c.border}; border-radius: 8px; padding: 8px 10px; selection-background-color: {c.primary}; selection-color: {c.on_primary}; }}
     QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QComboBox:focus, QDateTimeEdit:focus, QTimeEdit:focus {{ border: 2px solid {c.primary}; }}
     QLineEdit:disabled, QTextEdit:disabled, QComboBox:disabled {{ color: {c.text_disabled}; background: {c.surface_subtle}; }}
+    QComboBox {{ padding-right: 30px; }}
+    QComboBox::drop-down {{ subcontrol-origin: padding; subcontrol-position: top right; width: 28px; border: none; background: transparent; }}
+    QComboBox::down-arrow {{ image: url(:/icons/{chevron}.svg); width: 13px; height: 13px; }}
+    QCheckBox {{ spacing: 9px; color: {c.text_primary}; }}
+    QCheckBox::indicator {{ width: 16px; height: 16px; border: 1px solid {c.border_strong}; border-radius: 4px; background: {c.surface}; }}
+    QCheckBox::indicator:hover {{ border-color: {c.primary}; }}
+    QCheckBox::indicator:checked {{ background: {c.primary}; border-color: {c.primary}; image: url(:/icons/{check}.svg); }}
+    QCheckBox::indicator:disabled {{ background: {c.surface_subtle}; border-color: {c.border}; }}
     QTextEdit#ComposerInput {{ background: {c.surface_subtle}; border-color: {c.border}; border-radius: 8px; padding: 10px 12px; }}
     QTextEdit#ComposerInput:focus {{ background: {c.surface}; border: 2px solid {c.primary}; }}
     QListWidget, QTreeWidget, QTableWidget {{ color: {c.text_primary}; background: transparent; border: none; outline: none; alternate-background-color: {c.surface_subtle}; }}
+    QListWidget::indicator {{ width: 16px; height: 16px; border: 1px solid {c.border_strong}; border-radius: 4px; background: {c.surface}; }}
+    QListWidget::indicator:hover {{ border-color: {c.primary}; }}
+    QListWidget::indicator:checked {{ background: {c.primary}; border-color: {c.primary}; image: url(:/icons/{check}.svg); }}
+    QListWidget::indicator:disabled {{ background: {c.surface_subtle}; border-color: {c.border}; }}
     QListWidget#MentionCandidates, QListWidget#SearchResults {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: 8px; }}
     QListWidget#StickerGrid {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: 8px; }}
     QListWidget::item, QTreeWidget::item {{ padding: 8px; border-radius: 8px; }}
-    QListWidget#DirectoryList::item {{ min-height: 40px; padding: 6px 8px; }}
+    QListWidget#DirectoryList::item {{ min-height: 44px; padding: 6px 8px; border-radius: 8px; }}
     QListWidget#SettingsNav::item {{ min-height: 32px; padding: 6px 10px; }}
     QListWidget#DirectoryList::item:disabled {{ min-height: 22px; color: {c.text_disabled}; font-size: 12px; font-weight: 600; }}
+    QListWidget#AdminList {{ background: transparent; border: none; }}
+    QListWidget#AdminList::item {{ min-height: 32px; padding: 6px 8px; border-bottom: 1px solid {c.border}; border-radius: 0; }}
     QListWidget::item:hover, QTreeWidget::item:hover {{ background: {c.surface_subtle}; }}
     QListWidget::item:selected, QTreeWidget::item:selected {{ background: {c.primary_subtle}; color: {c.text_primary}; }}
     QTableWidget {{ gridline-color: {c.border}; }}
@@ -467,7 +609,7 @@ class ThemeManager(QObject):
         self._revision = 0
         self._mode = self._read_mode()
         variant = self._resolve_variant(self._mode)
-        self._snapshot = ThemeSnapshot(self._mode, variant, TOKENS_BY_VARIANT[variant], self._revision)
+        self._snapshot = ThemeSnapshot(self._mode, variant, TOKENS_BY_VARIANT[variant], METRICS, self._revision)
         self._style_hints = QGuiApplication.styleHints()
         if hasattr(self._style_hints, "colorSchemeChanged"):
             self._style_hints.colorSchemeChanged.connect(self._schedule_system_refresh)
@@ -552,11 +694,12 @@ class ThemeManager(QObject):
             return
         old = self._snapshot
         self._revision += 1
-        new = ThemeSnapshot(self._mode, variant, TOKENS_BY_VARIANT[variant], self._revision)
+        new = ThemeSnapshot(self._mode, variant, TOKENS_BY_VARIANT[variant], METRICS, self._revision)
         self.themeAboutToChange.emit(old, new)
         self._applying = True
         try:
             self.app.setPalette(build_palette(new.tokens))
+            self.app.setFont(ui_font(METRICS.font_body))
             self.app.setStyleSheet(build_stylesheet(new.tokens))
             self._snapshot = new
         finally:

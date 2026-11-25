@@ -71,6 +71,19 @@ class V2ThemeTests(unittest.TestCase):
             self.assertGreaterEqual(contrast_ratio(tokens.text_tertiary, tokens.surface), 4.5)
             self.assertGreaterEqual(contrast_ratio(tokens.mention_user_fg, tokens.mention_user_bg), 4.5)
             self.assertGreaterEqual(contrast_ratio(tokens.mention_agent_fg, tokens.mention_agent_bg), 4.5)
+            self.assertGreaterEqual(contrast_ratio(tokens.on_primary, tokens.primary), 4.5)
+            self.assertGreaterEqual(contrast_ratio(tokens.brand_accent, tokens.brand_panel), 3.0)
+
+    def test_theme_metrics_and_font_stacks_are_defined(self) -> None:
+        from client.v2.theme import METRICS, display_font, ui_font
+
+        self.assertGreater(METRICS.sidebar_wide, METRICS.sidebar_medium)
+        self.assertGreater(METRICS.sidebar_medium, METRICS.sidebar_compact)
+        self.assertGreater(METRICS.font_page, METRICS.font_body)
+        display = display_font()
+        self.assertTrue(display.family())
+        self.assertEqual(display.pixelSize(), METRICS.font_page)
+        self.assertTrue(ui_font().family())
 
     def test_modes_persist_and_system_refreshes_without_restart(self) -> None:
         from client.v2.theme import ThemeMode, ThemeVariant, reset_theme_manager

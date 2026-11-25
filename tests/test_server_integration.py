@@ -50,6 +50,40 @@ class WireClient:
 
 
 class ServerIntegrationTests(unittest.TestCase):
+    def test_admin_can_log_in_and_manage_builtin_agent(self) -> None:
+        asyncio.run(self._admin_login_scenario())
+
+    async def _admin_login_scenario(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            config = replace(
+                Config.from_env(), host="127.0.0.1", port=0, data_dir=root,
+                database_path=root / "chat.sqlite3", uploads_dir=root / "uploads",
+                admin_username="admin01", admin_password="password-admin",
+                admin_enabled=False, agent_enabled=False,
+            )
+            server = ChatServer(config)
+            await server.start()
+            port = int(server._server.sockets[0].getsockname()[1])
+            client = await WireClient.connect(port)
+            try:
+                reads = [asyncio.create_task(asyncio.to_thread(server.database.list_users)) for _ in range(20)]
+                request = await client.send("auth.login", {
+                    "username": "admin01", "password": "password-admin", "after_event_id": 0,
+                })
+                result = await client.until("auth.result", request_id=request, timeout=5)
+                self.assertEqual(result["payload"]["user"]["role"], "admin")
+                await asyncio.gather(*reads)
+                request = await client.send("agent.list")
+                agents = (await client.until("agent.list", request_id=request))["payload"]["agents"]
+                self.assertTrue(next(item for item in agents if item["id"] == "agent")["can_manage"])
+                request = await client.send("tool.list")
+                tools = (await client.until("tool.list", request_id=request))["payload"]["tools"]
+                self.assertIn("web_search", {item["name"] for item in tools})
+            finally:
+                await client.close()
+                await server.close()
+
     def test_private_chat_v2_protocol(self) -> None:
         asyncio.run(self._private_chat_v2_scenario())
 

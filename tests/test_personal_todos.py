@@ -554,7 +554,7 @@ class TodoUiTests(unittest.TestCase):
         workspace.show()
         workspace._open_todo(8)
         self.app.processEvents()
-        self.assertEqual(workspace.pages.currentIndex(), 4)
+        self.assertEqual(workspace.pages.currentIndex(), 3)
         self.assertEqual(workspace.todos._selected_id, 8)
         self.assertTrue(workspace.todos.detail_scroll.isVisible())
         workspace.close()

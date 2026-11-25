@@ -9,9 +9,9 @@
 <body>
   <main id="login" class="login-shell">
     <form id="login-form" class="card login-card">
-      <div class="brand">SC</div>
-      <h1>Server Admin Console</h1>
-      <p class="muted">仅授权管理员可访问</p>
+      <div class="brand">P</div>
+      <h1>Parlor 管理台</h1>
+      <p class="muted">智能聊天室 · 仅授权管理员可访问</p>
       <label>用户名<input name="username" autocomplete="username" required></label>
       <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
       <button type="submit">登录</button>
@@ -21,10 +21,11 @@
 
   <main id="console" class="app hidden">
     <aside>
-      <div class="logo">SC</div>
+      <div class="logo">P</div>
       <nav>
         <button data-page="dashboard" class="active">概览</button>
         <button data-page="models">模型配置</button>
+        <button data-page="search">联网搜索</button>
         <button data-page="agents">Agent 管理</button>
         <button data-page="roles">预设角色卡</button>
         <button data-page="stickers">表情包</button>
@@ -73,6 +74,20 @@
             </form>
           </article>
         </div>
+      </section>
+
+      <section id="page-search" class="page hidden">
+        <article class="card">
+          <div class="toolbar"><div><h2>联网搜索</h2><p class="muted compact">配置 Agent 的搜索服务。启用前会运行一次测试查询；密钥不会回显。</p></div><span id="search-status" class="pill">未启用</span></div>
+          <form id="search-form" class="form-grid">
+            <label>搜索服务<select name="provider"><option value="brave">Brave Web Search</option><option value="tavily">Tavily Search</option><option value="deepseek">DeepSeek Search</option><option value="searxng">SearXNG JSON</option></select></label>
+            <label class="check-row"><input name="enabled" type="checkbox">启用联网搜索服务</label>
+            <label class="wide" id="searxng-address">SearXNG 地址<input name="base_url" type="url" placeholder="https://search.example.org"></label>
+            <label class="wide" id="search-key-row">搜索 API Key<input name="api_key" type="password" autocomplete="new-password" placeholder="留空表示保持现有密钥"><small id="search-key-status">当前未配置密钥</small></label>
+            <p class="muted wide">工具权限仍需在客户端的 Agent 管理页逐个开启；群组可进一步限制。</p>
+            <div class="wide model-actions"><button id="apply-search-provider" type="submit">保存并停用</button></div>
+          </form>
+        </article>
       </section>
 
       <section id="page-agents" class="page hidden">

@@ -9,25 +9,31 @@
 - Avatar/UserAvatar、MentionTextEdit、MessageBubble、UserProfileCard、ProfilePopover、ConversationDetailsPanel 的业务能力。
 - 详情面板现有宽屏停靠/窄屏覆盖行为。
 
+### 当前实现（2026-11-25 基线）
+
+- `client/v2/components.py` 提供 `PageHeader`、`SectionHeader`、`IconButton`、`StatusBadge`、`SegmentedTabs`、`FilterBar`、`InlineNotice`、`StatTile`。
+- `Workspace` 使用 236/76/64px 三档侧栏；导航顺序为消息、通讯、AI 任务、待办、管理、设置。
+- `AuthPage` 使用左侧品牌面板 + 右侧表单面板；窄屏隐藏品牌区。
+- `ConversationPane`、`ChatSurface`、`ContactsDirectory`、`ContactDetails`、`SettingsSidebar`、`TodoWorkspace` 使用连续表面和分隔线。
+- `ConversationCard` 行高 72px；`DirectoryList` 行高 56px；任务/待办行 64px。
+
 ### 渐进重构
 
 - `ConversationCard`：加入明确选中态、状态与 token；保持 `activated(ConversationKey)`。
 - `MessageBubble`：主题化展示，不改变 recall/media signals 和消息格式。
 - `AgentTaskCard`：转为紧凑行，保持 `result_requested`。
 - `UserProfileCard`：统一用户与群组资料表现，不改变动作 signal。
-- `EmptyState`：增加可选图标和操作，默认构造保持兼容。
+- `EmptyState`：默认符号改为 `◇`，不依赖 Emoji；空详情落在画布上，不再包成巨大卡片。
 
 ### 允许新增的轻量组件
 
-- `PageHeader`
-- `SurfacePanel`
-- `IconButton`
-- `SegmentedTabs`
-- `StatusBadge`
-- `FilterBar`
-- `SettingsSection`
-- `InlineNotice`
-- `ConfirmActionDialog`
+- `PageHeader`、`SectionHeader`、`StatTile`：页面与分组标题。
+- `IconButton`：统一图标按钮的尺寸、tooltip、accessibleName 和焦点。
+- `SegmentedTabs`：联系人/群聊、主题或密度等少量互斥选项。
+- `StatusBadge`：连接、任务、Agent 等状态文本。
+- `FilterBar`：AI 任务与列表筛选行。
+- `InlineNotice`：表单反馈、加载和错误提示。
+- `ConfirmActionDialog`：仅在确有危险动作时使用。
 
 只有在两个以上页面出现相同结构或交互时才提取；不建立通用组件框架、容器 DSL 或新的状态管理层。
 
@@ -65,10 +71,12 @@
 ## 4. 页面语言
 
 - 导航：统一 Lucide 图标，选中项使用背景、图标/文字色和稳定指示；设置固定底部。
+- 导航：宽屏显示文字与品牌字标，中窄屏退化为图标栏；未读徽标不遮挡会话预览。
 - 聊天：会话栏和正文为连续工作区；输入区与正文用分隔线，不再用独立大卡片。
 - 通讯录：目录是紧凑列表，详情区域采用统一 Profile 展示。
 - AI 任务：任务类型为主标题，范围/用户/时间为 metadata，状态与结果操作右对齐。
 - 设置：以 section + separator 组织，不用一个撑满页面的空白卡片。
+- 登录：深绿品牌面板承担气质，表单区保持单一主操作；不再使用旧品牌名或默认 Qt 卡片。
 
 ## 5. 评审清单
 

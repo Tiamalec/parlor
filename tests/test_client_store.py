@@ -58,6 +58,29 @@ class ClientStoreTests(unittest.TestCase):
             )
             self.assertNotIn(request_id, self.store.state.pending)
 
+    def test_agent_and_group_tool_permissions_stay_separate(self) -> None:
+        self.store.handle_event({"type": "agent.list", "payload": {"agents": [
+            {"id": "agent", "owner_id": 1, "can_manage": False, "name": "我的 Agent"},
+        ]}})
+        self.assertTrue(self.store.state.agents[0]["can_manage"])
+        self.store.handle_event({"type": "agent.changed", "payload": {"agent": {
+            "id": "agent", "owner_id": 1, "can_manage": False, "name": "已更新 Agent",
+        }}})
+        self.assertTrue(self.store.state.agents[0]["can_manage"])
+        self.store.handle_event({"type": "agent.tools.list", "payload": {
+            "agent_id": "agent", "tools": [{"name": "web_search", "enabled": True}],
+        }})
+        self.store.handle_event({"type": "agent.group.tools.list", "payload": {
+            "group_id": 7, "agent_id": "agent",
+            "tools": [{"name": "web_search", "enabled": True, "group_enabled": False}],
+        }})
+        self.assertTrue(self.store.state.agent_tools["agent"][0]["enabled"])
+        self.assertFalse(self.store.state.group_agent_tools[("7", "agent")][0]["group_enabled"])
+        self.store.handle_event({"type": "agent.tools.updated", "payload": {
+            "agent_id": "agent", "tools": [{"name": "web_search", "enabled": False}],
+        }})
+        self.assertNotIn(("7", "agent"), self.store.state.group_agent_tools)
+
     def test_conversation_projection_and_message_merge(self) -> None:
         self.store.handle_event(
             {

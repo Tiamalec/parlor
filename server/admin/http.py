@@ -284,6 +284,10 @@ class AdminHttpServer:
             )
         if request.path == "/api/v1/admin/model-provider" and request.method == "GET":
             return Response.json(self.service.provider_view())
+        if request.path == "/api/v1/admin/search-provider" and request.method == "GET":
+            return Response.json(self.service.search_provider_view())
+        if request.path == "/api/v1/admin/search-provider" and request.method == "POST":
+            return Response.json(await self.service.apply_search_provider(session, request.json()))
         if request.path == "/api/v1/admin/model-provider/test-apply" and request.method == "POST":
             return Response.json(await self.service.test_and_apply_provider(session, request.json()))
         if request.path == "/api/v1/admin/model-presets" and request.method == "GET":

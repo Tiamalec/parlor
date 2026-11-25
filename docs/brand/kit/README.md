@@ -38,14 +38,14 @@
 - `brand-guidelines.html` / `brand-guidelines.png`：可视化一页纸
 - `previews/auth-light.png` / `auth-dark.png`：V2 登录页品牌块实机截图
 
-## 颜色
+## 颜色（历史品牌套件）
 
 - Ink `#172033`：房间、字标
 - Agent Purple `#6B4FD3`：Agent 席位
 - Light Agent `#B59CFF`：深底反白时的席位
 - White `#FFFFFF`：深底反白的房间与字标
 
-产品 UI 的主操作蓝仍为 `#356AE6`；标志本身不使用蓝色。
+2026-11-25 起，V2「会客厅」UI 基线在运行时使用主操作森林绿 `#2E5E4E`、Agent 暖紫褐 `#7A4B5A`（深色主题 `#8FBFA9` / `#D3A7B4`）；标志几何不变，运行时资源随主题重新着色。界面色值以 `docs/ui/design-system.md` 为准，本页其余色值保留历史品牌记录。
 
 ## 字标
 

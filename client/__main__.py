@@ -35,22 +35,12 @@ def main() -> None:
     parser.add_argument(
         "--port", type=int, default=int(os.environ.get("CLIENT_PORT", "8765"))
     )
-    parser.add_argument(
-        "--legacy",
-        action="store_true",
-        help="use the original Tkinter client",
-    )
     args = parser.parse_args()
-    if args.legacy:
-        from .app import ChatApplication
-
-        ChatApplication(args.host, args.port).run()
-        return
     try:
         from .v2 import run
     except ImportError as exc:
         if exc.name == "PySide6" or str(exc).startswith("No module named 'PySide6"):
-            parser.error("V2 客户端需要 PySide6。请先运行：python -m pip install -r requirements.txt；或使用 --legacy。")
+            parser.error("桌面客户端需要 PySide6。请先运行：python -m pip install -r requirements.txt")
         raise
     run(args.host, args.port)
 

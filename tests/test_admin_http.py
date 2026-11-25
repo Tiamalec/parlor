@@ -7,7 +7,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from server.admin.auth import AdminAuthError, AdminSessionStore
 from server.admin.config_store import ProviderConfigStore
@@ -101,6 +101,25 @@ class AdminHttpTests(unittest.TestCase):
                     Request("GET", "/api/v1/admin/model-presets", {}, {"cookie": cookie}, b"", "127.0.0.1")
                 )
                 self.assertTrue(any(item["id"] == "gemini" for item in json.loads(presets.body)["presets"]))
+                search_view = await http._route(Request(
+                    "GET", "/api/v1/admin/search-provider", {}, {"cookie": cookie}, b"", "127.0.0.1"
+                ))
+                self.assertFalse(json.loads(search_view.body)["enabled"])
+                with self.assertRaises(AdminAuthError):
+                    await http._route(Request(
+                        "POST", "/api/v1/admin/search-provider", {}, {"cookie": cookie},
+                        b'{"provider":"brave","api_key":"secret","enabled":true}', "127.0.0.1"
+                    ))
+                with patch("server.admin.service.search", new_callable=AsyncMock, return_value=[
+                    {"title": "Example", "url": "https://example.org", "snippet": "ok"}
+                ]):
+                    search_saved = await http._route(Request(
+                        "POST", "/api/v1/admin/search-provider", {},
+                        {"cookie": cookie, "x-csrf-token": csrf},
+                        b'{"provider":"brave","api_key":"secret","enabled":true}', "127.0.0.1"
+                    ))
+                self.assertTrue(json.loads(search_saved.body)["enabled"])
+                self.assertNotIn("secret", search_saved.body.decode())
                 profile_payload = json.dumps(
                     {
                         "name": "测试 OpenAI",

@@ -93,11 +93,11 @@ def _brand_icon(name: str, logical_size: int, revision: int) -> QIcon:
     return icon
 
 
-def brand_logo_icon(logical_size: int = 30) -> QIcon:
+def brand_logo_icon(logical_size: int = 30, *, on_dark: bool = False) -> QIcon:
     """Return the two-colour chat-room mark for the current theme."""
     manager = active_theme_manager()
     dark = manager is not None and manager.snapshot.variant == ThemeVariant.DARK
-    name = "brand-logo-dark" if dark else "brand-logo-light"
+    name = "brand-logo-dark" if dark or on_dark else "brand-logo-light"
     return _brand_icon(name, logical_size, _theme_revision())
 
 

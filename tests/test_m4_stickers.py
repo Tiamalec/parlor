@@ -491,7 +491,7 @@ class StickerClientTests(unittest.TestCase):
         editor = MentionTextEdit()
         sent: list[bool] = []
         editor.send_requested.connect(lambda: sent.append(True))
-        with patch("client.v2.widgets.QSettings") as settings:
+        with patch("client.v2.widgets.text_edit.QSettings") as settings:
             settings.return_value.value.return_value = True
             QTest.keyClick(editor, Qt.Key.Key_Return)
             self.assertEqual(sent, [True])

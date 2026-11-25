@@ -1,4 +1,4 @@
-"""Tkinter client for the course chatroom project."""
+"""Desktop client for the course chatroom project."""
 
 from .network import MAX_FRAME_SIZE, NetworkClient, ProtocolError, encode_frame
 
